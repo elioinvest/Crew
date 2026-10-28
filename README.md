@@ -1,3 +1,5 @@
+🌐 **English** · [中文](README.zh-CN.md)
+
 <p align="center">
   <img src="build/icon.svg" alt="Crew icon" width="128" height="128">
 </p>
