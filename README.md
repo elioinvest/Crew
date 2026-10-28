@@ -2,8 +2,6 @@
   <img src="build/icon.svg" alt="Crew icon" width="128" height="128">
 </p>
 
-<h1 align="center">Crew</h1>
-
 Crew is a Windows desktop app for Claude Code and Codex. Run the official CLIs side by side in split panes, organized by project, with a real prompt box, one-click model and mode switching, live status for each agent, a built-in web browser and tray mode. Resume any past session with a single click.
 
 Crew doesn't replace either tool. Every session is the official `claude` or `codex` command running in a real terminal, with your own account and history. Crew adds the workspace around them, and collects nothing itself: your code and conversations go only to the agents you run.
