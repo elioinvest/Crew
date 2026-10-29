@@ -63,7 +63,7 @@ function hostRows(h) {
   const children = [];
   const term = state.terms.get(termKey(h));
   children.push(el('div', {
-    class: `row-item session host-child${state.active === termKey(h) ? ' active' : ''}${leafOf(termKey(h)) ? ' shown' : ''}`,
+    class: `row-item session host-child host-term${state.active === termKey(h) ? ' active' : ''}${leafOf(termKey(h)) ? ' shown' : ''}`,
     title: `Your terminal on ${h.name}`,
     onclick: () => showHostTerminal(h),
   },
@@ -484,7 +484,7 @@ function nextPrompt() {
     const inputs = p.prompts.map((q) => el('input', { type: q.echo ? 'text' : 'password' }));
     const submit = () => answer(inputs.map((i) => i.value));
     card.replaceChildren(el('h2', {}, `Sign in to ${p.host}`),
-      p.instructions ? el('p', { class: 'prompt-text' }, p.instructions) : null,
+      ...(p.instructions ? [el('p', { class: 'prompt-text' }, p.instructions)] : []),
       ...p.prompts.map((q, i) => el('label', {}, q.prompt, inputs[i])),
       actions(el('button', { onclick: () => answer(null) }, 'Cancel'), el('button', { class: 'primary', onclick: submit }, 'Continue')));
     inputs.at(-1)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });

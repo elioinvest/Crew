@@ -28,6 +28,8 @@ app.on('second-instance', () => showWindow());
 
 // Saved SSH hosts for the agents (after userData is settled above: it keeps its files there).
 const ssh = require('./ssh');
+// Agents the sessions can hand work to by @-mention (crew ask …), on the same pipe as crew-ssh.
+const agents = require('./agents');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -57,6 +59,7 @@ const defaultConfig = {
   collapsed: {},
   projectOrder: [], // project paths in sidebar order, set by dragging
   closeToTray: true, // closing the window keeps Crew (and running sessions) in the tray
+  language: 'auto', // 'auto' (follows Windows), 'en' or 'zh'
   showUsage: true, // plan usage bar at the bottom; adds a status line to Claude sessions Crew starts
   trayHintShown: false,
 };
@@ -75,6 +78,19 @@ function saveConfig(cfg) {
 }
 
 let config = loadConfig();
+
+// The few strings this process shows itself (dialogs, the tray), in the interface's language.
+// The window translates the rest (renderer/i18n.js).
+const MAIN_ZH = {
+  'Add project folder': '添加项目文件夹', 'Attach files': '添加文件', Delete: '删除', Cancel: '取消', 'Delete session': '删除会话', 'Delete failed': '删除失败',
+  'The Codex session is permanently deleted with `codex delete`. This cannot be undone. If the session is running, it will be stopped.': '将使用 `codex delete` 永久删除该 Codex 会话，此操作无法撤销。如果会话正在运行，它会被停止。',
+  'The session file is moved to the Recycle Bin. If the session is running, it will be stopped.': '会话文件会被移到回收站。如果会话正在运行，它会被停止。',
+  'Codex could not delete the session.': 'Codex 无法删除该会话。', 'Crew is still running': 'Crew 仍在运行',
+  'Your sessions keep running. Click the tray icon to reopen, or right-click it to quit.': '你的会话会继续运行。点击托盘图标重新打开，或右键单击退出。',
+  'Open Crew': '打开 Crew', 'Quit Crew': '退出 Crew',
+};
+const zhUi = () => config.language === 'zh' || (config.language !== 'en' && /^zh/i.test(app.getLocale()));
+const tr = (s) => (zhUi() && MAIN_ZH[s]) || s;
 
 // ---------- session scanning ----------
 
@@ -545,7 +561,7 @@ ipcMain.on('pty:kill', (_e, termId) => {
 ipcMain.handle('projects:list', () => scanProjects());
 
 ipcMain.handle('projects:add', async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Add project folder' });
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: tr('Add project folder') });
   if (r.canceled || !r.filePaths[0]) return null;
   const p = r.filePaths[0];
   config.hiddenProjects = config.hiddenProjects.filter((h) => normPath(h) !== normPath(p));
@@ -590,7 +606,7 @@ function cleanAttachments() {
 }
 
 ipcMain.handle('dialog:files', async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'], title: 'Attach files' });
+  const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'], title: tr('Attach files') });
   return r.canceled ? [] : r.filePaths;
 });
 
@@ -711,14 +727,14 @@ ipcMain.handle('sessions:delete', async (_e, id, title, agent) => {
   if (!codex && !file) return false;
   const r = await dialog.showMessageBox(win, {
     type: 'warning',
-    buttons: ['Delete', 'Cancel'],
+    buttons: [tr('Delete'), tr('Cancel')],
     defaultId: 1,
     cancelId: 1,
-    title: 'Delete session',
-    message: `Delete "${title || id}"?`,
-    detail: codex
+    title: tr('Delete session'),
+    message: zhUi() ? `删除"${title || id}"？` : `Delete "${title || id}"?`,
+    detail: tr(codex
       ? 'The Codex session is permanently deleted with `codex delete`. This cannot be undone. If the session is running, it will be stopped.'
-      : 'The session file is moved to the Recycle Bin. If the session is running, it will be stopped.',
+      : 'The session file is moved to the Recycle Bin. If the session is running, it will be stopped.'),
   });
   if (r.response !== 0) return false;
   const wasRunning = stopSession(id);
@@ -731,7 +747,7 @@ ipcMain.handle('sessions:delete', async (_e, id, title, agent) => {
       if (res.code === 0) break;
     }
     if (res.code !== 0) {
-      dialog.showMessageBox(win, { type: 'error', title: 'Delete failed', message: 'Codex could not delete the session.', detail: res.output.trim().slice(-1500) });
+      dialog.showMessageBox(win, { type: 'error', title: tr('Delete failed'), message: tr('Codex could not delete the session.'), detail: res.output.trim().slice(-1500) });
       return false;
     }
     return true;
@@ -1075,6 +1091,7 @@ ipcMain.handle('config:set', (_e, patch) => {
   config = { ...config, ...patch };
   saveConfig(config);
   if (patch.theme && win) win.setTitleBarOverlay?.(overlayFor(config.theme));
+  if (patch.language) trayMenu();
   return config;
 });
 
@@ -1119,7 +1136,7 @@ function createWindow() {
     e.preventDefault();
     win.hide();
     if (!config.trayHintShown && tray) {
-      tray.displayBalloon({ iconType: 'info', title: 'Crew is still running', content: 'Your sessions keep running. Click the tray icon to reopen, or right-click it to quit.' });
+      tray.displayBalloon({ iconType: 'info', title: tr('Crew is still running'), content: tr('Your sessions keep running. Click the tray icon to reopen, or right-click it to quit.') });
       config = { ...config, trayHintShown: true };
       saveConfig(config);
     }
@@ -1157,12 +1174,16 @@ function showWindow() {
 function createTray() {
   tray = new Tray(path.join(__dirname, 'build', 'icon.ico'));
   tray.setToolTip('Crew');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Crew', click: showWindow },
-    { type: 'separator' },
-    { label: 'Quit Crew', click: () => { quitting = true; app.quit(); } },
-  ]));
+  trayMenu();
   tray.on('click', showWindow);
+}
+
+function trayMenu() {
+  tray?.setContextMenu(Menu.buildFromTemplate([
+    { label: tr('Open Crew'), click: showWindow },
+    { type: 'separator' },
+    { label: tr('Quit Crew'), click: () => { quitting = true; app.quit(); } },
+  ]));
 }
 
 // node-pty's kill() on Windows closes the pseudo console synchronously, and that waits for output
@@ -1183,6 +1204,7 @@ app.on('before-quit', () => {
   quitting = 'done';
   killAllPtys();
   ssh.shutdown();
+  agents.shutdown();
   // Last resort: if anything still holds the process, leave anyway.
   setTimeout(() => app.exit(0), 3000).unref();
 });
@@ -1190,6 +1212,11 @@ app.on('before-quit', () => {
 app.whenReady().then(() => {
   createWindow();
   ssh.init(() => win);
+  agents.init({
+    getWin: () => win, cleanEnv, sessionEnv: ssh.sessionEnv, shellCommand, getConfig: () => config,
+    onRunDone: () => refreshUsage('claude', true).then(() => refreshUsage('codex', true)), // runs spend quota
+  });
+  ssh.registerOps(agents.ops);
   createTray();
   startWatcher();
   cleanAttachments();

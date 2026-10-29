@@ -40,6 +40,14 @@ contextBridge.exposeInMainWorld('api', {
   onSshPromptCancel: (cb) => ipcRenderer.on('ssh:prompt-cancel', (_e, id) => cb(id)),
   answerSsh: (id, answer) => ipcRenderer.send('ssh:answer', id, answer),
 
+  listAgents: () => ipcRenderer.invoke('agents:list'),
+  codexModels: () => ipcRenderer.invoke('agents:codex-models'),
+  saveAgent: (a) => ipcRenderer.invoke('agents:save', a),
+  deleteAgent: (id) => ipcRenderer.invoke('agents:delete', id),
+  listRuns: () => ipcRenderer.invoke('agents:runs'),
+  stopRun: (id) => ipcRenderer.invoke('agents:stop', id),
+  onRun: (cb) => ipcRenderer.on('crew:run', (_e, r) => cb(r)),
+
   getUsage: (force) => ipcRenderer.invoke('usage:get', force),
   onUsageChanged: (cb) => ipcRenderer.on('usage:changed', () => cb()),
 

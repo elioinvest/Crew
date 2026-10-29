@@ -1,4 +1,29 @@
 node_modules/
-dist/
-release/
 .claude/
+
+# Build and package output: electron-builder writes to release/ (see package.json), but a
+# build can also leave unpacked apps elsewhere. None of it belongs in git, wherever it lands.
+release/
+dist/
+out/
+*-unpacked/
+*-unpacked.tmp/
+*.blockmap
+builder-debug.yml
+builder-effective-config.yaml
+latest*.yml
+
+# Installers and archives (GitHub rejects files over 100 MB; attach them to a release instead)
+*.exe
+*.msi
+*.msix
+*.appx
+*.zip
+*.7z
+*.dmg
+*.pkg
+*.AppImage
+*.deb
+*.rpm
+*.snap
+*.nupkg

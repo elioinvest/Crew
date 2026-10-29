@@ -52,6 +52,16 @@
         </span>
       </div>
       <div id="host-list"></div>
+
+      <div class="section-head hosts-head agents-head" id="agents-head">
+        <span class="hosts-title" id="agents-toggle" title="Agents your sessions can @-mention to hand them work">Agents</span>
+        <span class="hosts-actions">
+          <button class="icon-btn small" id="btn-add-agent" title="Add agent">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </span>
+      </div>
+      <div id="agent-list"></div>
     </aside>
 
     <div id="resizer"></div>
@@ -94,6 +104,7 @@
       <div id="composer" class="hidden">
         <div class="composer-card">
           <div id="composer-attachments" class="hidden"></div>
+          <div id="mention-pop" class="hidden"></div>
           <textarea id="composer-input" rows="1" spellcheck="false" placeholder="How can I help you today?"></textarea>
           <div class="composer-row">
             <button class="icon-btn" id="composer-attach" title="Attach files">
@@ -274,6 +285,9 @@
         <label>Font size
           <input id="cfg-font" type="number" min="9" max="28" />
         </label>
+        <label>Language
+          <select id="cfg-language"><option value="auto">Automatic</option><option value="en">English</option><option value="zh">中文</option></select>
+        </label>
       </div>
       <label class="check"><input id="cfg-tray" type="checkbox" /> Keep running in the tray when the window is closed</label>
       <label class="check"><input id="cfg-usage" type="checkbox" /> Show plan usage at the bottom (Claude sessions Crew starts get a status line hook that records it)</label>
@@ -285,6 +299,7 @@
     </div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
@@ -292,9 +307,12 @@
   <div id="host-modal" class="modal hidden"><div class="modal-card host-card"></div></div>
   <div id="ssh-prompt" class="modal hidden"><div class="modal-card"></div></div>
   <div id="ssh-cards"></div>
+  <div id="agent-modal" class="modal hidden"><div class="modal-card host-card"></div></div>
+  <div id="run-cards"></div>
 
   <script src="renderer.js"></script>
   <script src="git.js"></script>
   <script src="hosts.js"></script>
+  <script src="agents.js"></script>
 </body>
 </html>

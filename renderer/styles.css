@@ -881,3 +881,36 @@ body.resizing-x { cursor: col-resize; }
 .host-children { margin-left: 21px; padding-left: 8px; border-left: 1px solid var(--border); margin-bottom: 4px; }
 .host-child .agent-icon { display: inline-flex; }
 .agent-badge.ssh { color: var(--running); }
+
+/* ---------- agents ---------- */
+
+#agent-list { flex: none; max-height: 24vh; overflow-y: auto; overflow-x: hidden; padding-bottom: 6px; }
+.agent-row .meta { color: var(--muted); font-size: 12px; }
+.agent-warn { margin-top: -6px; }
+.agent-warn.danger { color: #c4462d; }
+
+#run-cards { position: fixed; top: 60px; right: 16px; z-index: 65; display: flex; flex-direction: column; gap: 8px; width: 340px; max-width: calc(100vw - 32px); max-height: calc(100vh - 160px); overflow-y: auto; }
+.run-card { background: var(--main-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; box-shadow: 0 8px 26px rgba(0, 0, 0, .14); padding: 9px 11px; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; animation: git-fade .15s ease-out; }
+.run-card.done { border-left-color: var(--running); }
+.run-card.failed, .run-card.stopped { border-left-color: #c4462d; }
+.run-head { display: flex; align-items: center; gap: 6px; }
+.run-head .agent-icon { display: inline-flex; }
+.run-state { color: var(--muted); display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; white-space: nowrap; }
+.run-x { padding: 2px; margin: -2px -4px -2px 0; }
+.run-task { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run-activity { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.run-caller { color: var(--muted); font-size: 11.5px; }
+.run-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.run-actions button { background: none; border: 1px solid var(--border); border-radius: 14px; padding: 3px 11px; cursor: pointer; font-size: 12px; }
+.run-actions button:hover { background: var(--hover); }
+.run-result { margin: 0; padding: 10px 12px; background: var(--side-bg); border-radius: 8px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; max-height: 55vh; overflow: auto; user-select: text; }
+
+.composer-card { position: relative; }
+#mention-pop { position: absolute; left: 12px; bottom: calc(100% + 6px); z-index: 30; min-width: 280px; max-width: 480px; background: var(--main-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16); padding: 4px; font-size: 13px; }
+.mention-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.mention-item .agent-icon { display: inline-flex; }
+.mention-item.on, .mention-item:hover { background: var(--hover); }
+.mention-item .muted { color: var(--muted); }
+.field-hint.danger { color: #c4462d; }
+.modal-actions button.primary:disabled { opacity: .4; cursor: default; }
+:root[lang="zh-CN"] .pane.focused .pane-head::after { content: "当前"; }

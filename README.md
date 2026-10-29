@@ -81,12 +81,22 @@ Agents can manage your servers over SSH, without ever seeing your passwords or k
 - The first connection to a host shows its key fingerprint to trust. If the key later changes, Crew blocks the connection.
 - Each host's editor lists its recent agent commands and what happened to them.
 
+### Agents (@-mentions)
+
+Hand parts of a job to other agents from your main session, one after another or several at once.
+
+- Add agents under **Agents** in the sidebar. **+** offers a code reviewer, a tester, a publisher or a blank agent. Each has a name, runs on Claude or Codex (Crew checks which are installed) with a model and reasoning effort picked from what that CLI offers, has instructions, and has a **Can** setting: only read, edit and run commands in the project, or anything without asking. Give the last only to agents you trust with it.
+- In a session, type `@` to pick agents, and say what should happen: "Build the signup flow. Then have @CodeReviewerAgent review it and @TesterAgent test it at the same time. If both pass, have @CodePublisherAgent publish it."
+- The main agent hands each one a task with `crew ask` (`--bg` for several at once, then `crew wait`) and gets their answers back. Agents work in the same folder, in Claude's or Codex's non-interactive mode.
+- A card at the top right shows each running agent, what it's doing and for how long, with **Stop**, **Result** and **Open** (continue a Claude agent's run as a normal session).
+- Each agent uses its own CLI's quota, shown in the usage bar.
+
 ### Window
 
 - The button at the top left hides or shows the sidebar.
 - Closing the window keeps Crew running in the system tray, so sessions continue. Click the tray icon to reopen it, or right-click it and choose **Quit Crew** to exit. You can turn this off in Settings.
 - The bar at the bottom shows your plan usage for each agent: how much of the 5-hour limit is used and when it resets, then the weekly limit. Hover for details. Crew asks each agent for its current numbers in the background, with your existing sign-in: Codex through its `app-server`, and Claude (Pro and Max plans) by running `/usage` in a hidden Claude Code window that saves no transcript. Claude sessions Crew starts also get a status line hook that updates the numbers after each reply, then runs your own status line as usual; your Claude settings files aren't changed. Turn the bar off in Settings.
-- Settings (gear icon) set the light or dark theme, the font size, and the command and arguments used to start each agent.
+- Settings (gear icon) set the language (Automatic follows Windows, English or 中文), the light or dark theme, the font size, and the command and arguments used to start each agent.
 
 ## Build from source
 

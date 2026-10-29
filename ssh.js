@@ -461,6 +461,9 @@ async function approve(h, req, waiting) {
 
 // ---------- the bridge the `crew-ssh` command talks to ----------
 
+const extraOps = {}; // other commands on the same pipe, e.g. `crew` (agents.js)
+const registerOps = (ops) => Object.assign(extraOps, ops);
+
 const bridge = {
   pipe: process.platform === 'win32' ? `\\\\.\\pipe\\crew-ssh-${crypto.randomBytes(8).toString('hex')}` : path.join(dataDir(), 'crew-ssh.sock'),
   token: crypto.randomBytes(24).toString('hex'),
@@ -494,6 +497,7 @@ function handleClient(sock) {
     try { m = JSON.parse(buf.slice(0, i)); } catch { fail('Bad request.'); return; }
     if (!sameToken(m.token)) { fail('Not authorized.'); return; }
     try {
+      if (extraOps[m.op]) { await extraOps[m.op](m, { send, fail, end: () => sock.end() }); return; } // the crew command (agents.js)
       if (m.op === 'hosts') {
         send({ type: 'result', hosts: allHosts().map((h) => ({ id: h.id, name: h.name, host: h.host, port: h.port || 22, user: h.user || '', group: h.group || '', notes: h.notes || '', approval: h.approval || 'changes' })) });
         sock.end();
@@ -574,18 +578,21 @@ function startBridge() {
 
 const binDir = () => file('bin');
 
-// Writes crew-ssh into Crew's data folder (a .cmd for cmd/PowerShell and a script for Git Bash),
-// running crew-ssh.js with Crew's own executable in Node mode. Sessions get it on their PATH.
+// Writes crew-ssh and crew into Crew's data folder (a .cmd for cmd/PowerShell and a script for
+// Git Bash each), running their .js with Crew's own executable in Node mode. Sessions get them
+// on their PATH.
 function installCli() {
   try {
     fs.mkdirSync(binDir(), { recursive: true });
-    const js = path.join(binDir(), 'crew-ssh.js');
-    fs.writeFileSync(js, fs.readFileSync(path.join(__dirname, 'crew-ssh.js')));
-    if (process.platform === 'win32') {
-      fs.writeFileSync(path.join(binDir(), 'crew-ssh.cmd'), `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${process.execPath}" "${js}" %*\r\n`);
-    }
     const fwd = (p) => p.replace(/\\/g, '/');
-    fs.writeFileSync(path.join(binDir(), 'crew-ssh'), `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${fwd(process.execPath)}" "${fwd(js)}" "$@"\n`, { mode: 0o755 });
+    for (const name of ['crew-ssh', 'crew']) {
+      const js = path.join(binDir(), `${name}.js`);
+      fs.writeFileSync(js, fs.readFileSync(path.join(__dirname, `${name}.js`)));
+      if (process.platform === 'win32') {
+        fs.writeFileSync(path.join(binDir(), `${name}.cmd`), `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${process.execPath}" "${js}" %*\r\n`);
+      }
+      fs.writeFileSync(path.join(binDir(), name), `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${fwd(process.execPath)}" "${fwd(js)}" "$@"\n`, { mode: 0o755 });
+    }
     return true;
   } catch {
     return false;
@@ -744,4 +751,4 @@ function shutdown() {
   for (const id of [...pool.keys()]) dropConn(id);
 }
 
-module.exports = { init, shutdown, sessionEnv, openShell, onlyReads, parseSshConfig };
+module.exports = { init, shutdown, sessionEnv, openShell, registerOps, onlyReads, parseSshConfig };

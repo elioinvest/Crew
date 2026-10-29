@@ -1005,6 +1005,7 @@ $('#btn-settings').addEventListener('click', () => {
   $('#cfg-codex-command').value = state.config.codexCommand;
   $('#cfg-codex-args').value = state.config.codexArgs;
   $('#cfg-theme').value = state.config.theme;
+  $('#cfg-language').value = state.config.language || 'auto';
   $('#cfg-font').value = state.config.fontSize;
   $('#cfg-tray').checked = state.config.closeToTray !== false;
   $('#cfg-usage').checked = state.config.showUsage !== false;
@@ -1021,7 +1022,9 @@ $('#cfg-save').addEventListener('click', async () => {
     fontSize: Math.min(28, Math.max(9, parseInt($('#cfg-font').value, 10) || 14)),
     closeToTray: $('#cfg-tray').checked,
     showUsage: $('#cfg-usage').checked,
+    language: $('#cfg-language').value,
   });
+  applyLanguage(state.config.language); // i18n.js: reloads in the new language
   applyTheme();
   renderUsage();
   $('#settings').classList.add('hidden');
@@ -1498,9 +1501,10 @@ async function submitComposer() {
     const q = /\s/.test(f.path) ? `"${f.path}"` : f.path;
     refs.push(codex ? q : `@${q}`);
   }
-  const body = [refs.join(' '), text].filter(Boolean).join(' ');
+  const body = withAgentNote([refs.join(' '), text].filter(Boolean).join(' ')); // @agents (agents.js)
   if (body) paste(entry, `${files.some((f) => f.isImage) ? ' ' : ''}${body.replace(/\r\n?|\n/g, '\r')}`);
-  await sleep(files.length ? 300 : 150);
+  // An Enter too soon after a long paste counts as part of it (Codex, at least), so wait longer.
+  await sleep(files.length ? 300 : body.length > 200 ? 700 : 150);
   api.write(entry.termId, '\r');
 }
 
@@ -2130,6 +2134,7 @@ api.onUsageChanged(() => loadUsage());
 
 (async () => {
   state.config = await api.getConfig();
+  applyLanguage(state.config.language); // i18n.js
   applyTheme();
   restoreLayout();
   renderLayout();
