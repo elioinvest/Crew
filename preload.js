@@ -18,6 +18,10 @@ contextBridge.exposeInMainWorld('api', {
   onBrowserNewTab: (cb) => ipcRenderer.on('browser:new-tab', (_e, url) => cb(url)),
   onBrowserShortcut: (cb) => ipcRenderer.on('browser:shortcut', (_e, k) => cb(k)),
 
+  gitRoot: (cwd) => ipcRenderer.invoke('git:root', cwd),
+  git: (cwd, args, input) => ipcRenderer.invoke('git:run', cwd, args, input),
+  gitIgnore: (root, pattern) => ipcRenderer.invoke('git:ignore', root, pattern),
+
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
 

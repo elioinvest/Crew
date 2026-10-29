@@ -58,6 +58,15 @@ You don't have to do this in advance. If you start a session for an agent that i
 - The globe button at the top right shows or hides the browser. It has tabs (**Ctrl+T**, **Ctrl+W**, **Ctrl+Tab**) and keeps you signed in to websites.
 - Image paths in the conversation open in a viewer. Other file paths open in their default program.
 
+### Git
+
+- When the active session's folder is a Git repository, a branch button appears at the top right. Click it to open Git in a panel on the right, beside the terminal; drag the panel's left edge to resize it, and click the button again or the panel's **×** to close it. It follows the active session to its repository. To open any project, right-click it and choose **Open in Git**. A folder that isn't a repository yet can be initialized from there.
+- The toolbar has **Commit**, **Pull**, **Push**, **Fetch**, **Branch**, **Merge**, **Stash**, **Discard** and **Tag**. Badges show the number of changed files and how many commits you're ahead of or behind the upstream branch.
+- **History** shows the commit graph of all branches, tags and remotes. Select a commit to see its details and changed files, then a file to see its diff. Right-click a commit to check it out, branch or tag from it, merge, rebase, cherry-pick, revert or reset to it.
+- **File status** lists staged and unstaged files with a commit box. Stage or unstage whole files (double-click, the **+** / **−** button, or **Ctrl**/**Shift**-click several) or single hunks from the diff. **Ctrl+Enter** commits.
+- The sidebar lists branches, tags, remotes and stashes. Double-click a branch to check it out; right-click for more. Merges, rebases and cherry-picks that stop on a conflict show a banner with **Abort** (and **Continue**).
+- Crew runs your own `git`, so it needs [Git for Windows](https://git-scm.com/download/win). Pushing and pulling use your configured credentials (Git Credential Manager). The view refreshes on its own while agents change files.
+
 ### Window
 
 - The button at the top left hides or shows the sidebar.

@@ -714,6 +714,61 @@ ipcMain.handle('sessions:delete', async (_e, id, title, agent) => {
   return true;
 });
 
+// ---------- git ----------
+
+// The Git view runs the real git CLI in the repository. Output is plain text (no color, no
+// pager, paths unquoted) and git never waits on a terminal prompt: credentials go through the
+// configured credential helper (Git Credential Manager on Windows) or the command fails.
+const GIT_FLAGS = ['-c', 'core.quotepath=false', '-c', 'color.ui=false', '-c', 'i18n.logOutputEncoding=UTF-8'];
+
+function runGit(cwd, args, input) {
+  return new Promise((resolve) => {
+    // GIT_EDITOR=true accepts default messages (merges, reverts) instead of waiting on an editor.
+    const env = { ...cleanEnv(), GIT_TERMINAL_PROMPT: '0', GIT_PAGER: '', GIT_EDITOR: 'true', LC_ALL: 'C.UTF-8' };
+    delete env.FORCE_COLOR;
+    let child;
+    try {
+      child = spawn('git', [...GIT_FLAGS, ...args], { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (e) {
+      resolve({ code: -1, stdout: '', stderr: e.message });
+      return;
+    }
+    const out = [];
+    const err = [];
+    child.stdout.on('data', (d) => out.push(d));
+    child.stderr.on('data', (d) => err.push(d));
+    child.on('error', (e) => resolve({ code: -1, stdout: '', stderr: e.code === 'ENOENT' ? 'Git is not installed or not on PATH.' : e.message }));
+    child.on('close', (code) => resolve({ code, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') }));
+    child.stdin.on('error', () => { /* git exited before reading stdin */ });
+    child.stdin.end(input ?? undefined);
+  });
+}
+
+ipcMain.handle('git:root', async (_e, cwd) => {
+  if (!cwd || !fs.existsSync(cwd)) return null;
+  const r = await runGit(cwd, ['rev-parse', '--show-toplevel']);
+  return r.code === 0 ? path.normalize(r.stdout.trim()) : null;
+});
+
+ipcMain.handle('git:run', (_e, cwd, args, input) => {
+  if (!cwd || !fs.existsSync(cwd) || !Array.isArray(args)) return { code: -1, stdout: '', stderr: 'Repository folder not found.' };
+  return runGit(cwd, args.map(String), input);
+});
+
+// Appends a pattern to the repository's .gitignore, starting it on a new line.
+ipcMain.handle('git:ignore', (_e, root, pattern) => {
+  try {
+    const file = path.join(root, '.gitignore');
+    const cur = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    if (cur.split(/\r?\n/).includes(pattern)) return true;
+    const eol = cur.includes('\r\n') ? '\r\n' : '\n';
+    fs.appendFileSync(file, `${cur && !cur.endsWith('\n') ? eol : ''}${pattern}${eol}`);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle('config:get', () => config);
 ipcMain.handle('config:set', (_e, patch) => {
   config = { ...config, ...patch };

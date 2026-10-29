@@ -271,6 +271,7 @@ function projectMenu(e, p) {
     { label: 'Move up', action: () => shiftProject(p, -1) },
     { label: 'Move down', action: () => shiftProject(p, 1) },
     { label: 'Move to top', action: () => shiftProject(p, -Infinity) },
+    { label: 'Open in Git', action: () => openGit(p.path) },
     { label: 'Open folder', action: () => api.revealProject(p.path) },
     { label: 'Copy path', action: () => navigator.clipboard.writeText(p.path) },
     { label: 'Hide from list', danger: true, action: async () => { await api.hideProject(p.path); refresh(); } },
@@ -574,6 +575,7 @@ function activate(sessionId, { focusInput = true } = {}) {
   }
   renderComposer();
   renderSidebar();
+  updateGitButton();
 }
 
 function closeSession(sessionId) {
