@@ -67,10 +67,25 @@ You don't have to do this in advance. If you start a session for an agent that i
 - The sidebar lists branches, tags, remotes and stashes. Double-click a branch to check it out; right-click for more. Merges, rebases and cherry-picks that stop on a conflict show a banner with **Abort** (and **Continue**).
 - Crew runs your own `git`, so it needs [Git for Windows](https://git-scm.com/download/win). Pushing and pulling use your configured credentials (Git Credential Manager). The view refreshes on its own while agents change files.
 
+### Remote hosts (SSH)
+
+Agents can manage your servers over SSH, without ever seeing your passwords or keys. The idea comes from [Hatoba](https://github.com/scarletkc/Hatoba).
+
+- Add servers under **Hosts** at the bottom of the sidebar, or choose **⋯ → Import from ~/.ssh/config**. Each host has a name, address, user, sign-in method (key file, ssh-agent or password), an optional group, and **notes for agents**, e.g. "Production: never restart the database."
+- **Click a host** to open its workspace: your terminal on the server on one side, and an agent session (Claude, or Codex from the **+** on the host) on the other. Chat with the agent, e.g. "why is nginx failing?" or "free up some disk space", and it works on that server while you watch and use the terminal yourself. The agent can also read your terminal ("look at this error").
+- A host unfolds in the sidebar like a project: **Terminal**, then its agent sessions, newest first. Click one to resume it beside the terminal.
+- The agent knows which server it's on from the workspace's instructions, including your notes for that host. It uses `crew-ssh` (`exec`, `screen`, `cp`). Agents in other sessions can use it too, by host name.
+- Choose **⋯ → Teach Claude Code and Codex to use crew-ssh** once. It installs a skill so the agents know the command without being told.
+- Crew keeps the credentials and signs in itself. Passwords are saved encrypted with Windows data protection, and the window and the agents never receive them.
+- Commands that only read (`df`, `ps`, `systemctl status`, `journalctl`, `docker ps`…) run at once. Anything that could change something, and every upload, shows a card where you **Allow**, **Allow 15 min** (everything on that host) or **Deny**. Each host can instead ask before every command or run everything.
+- The first connection to a host shows its key fingerprint to trust. If the key later changes, Crew blocks the connection.
+- Each host's editor lists its recent agent commands and what happened to them.
+
 ### Window
 
 - The button at the top left hides or shows the sidebar.
 - Closing the window keeps Crew running in the system tray, so sessions continue. Click the tray icon to reopen it, or right-click it and choose **Quit Crew** to exit. You can turn this off in Settings.
+- The bar at the bottom shows your plan usage for each agent: how much of the 5-hour limit is used and when it resets, then the weekly limit. Hover for details. Crew asks each agent for its current numbers in the background, with your existing sign-in: Codex through its `app-server`, and Claude (Pro and Max plans) by running `/usage` in a hidden Claude Code window that saves no transcript. Claude sessions Crew starts also get a status line hook that updates the numbers after each reply, then runs your own status line as usual; your Claude settings files aren't changed. Turn the bar off in Settings.
 - Settings (gear icon) set the light or dark theme, the font size, and the command and arguments used to start each agent.
 
 ## Build from source

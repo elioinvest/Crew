@@ -10,6 +10,7 @@
   --running: #3fa45b;
   --term-bg: #ffffff;
   --overlay-w: 140px;
+  --statusbar-h: 26px;
 }
 
 [data-theme="dark"] {
@@ -42,7 +43,9 @@ button { font: inherit; color: inherit; }
 
 svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
-#app { display: flex; height: 100vh; }
+#app { display: flex; height: calc(100vh - var(--statusbar-h)); }
+body.no-statusbar { --statusbar-h: 0px; }
+body.no-statusbar #statusbar { display: none; }
 
 /* ---------- sidebar ---------- */
 
@@ -788,3 +791,93 @@ body.resizing-x { cursor: col-resize; }
 @container (max-width: 620px) {
   #git-nav { width: 132px; }
 }
+
+/* ---------- usage bar ---------- */
+
+#statusbar { height: var(--statusbar-h); display: flex; align-items: center; gap: 14px; padding: 0 8px 0 12px; border-top: 1px solid var(--border); background: var(--side-bg); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; }
+#sb-usage { display: flex; align-items: center; gap: 16px; min-width: 0; overflow: hidden; }
+.sb-item { display: flex; align-items: center; gap: 5px; cursor: default; }
+.sb-item .agent-badge { width: 13px; height: 13px; }
+.sb-item b { font-weight: 600; color: var(--text); }
+.sb-item b.warn { color: #c98a12; }
+.sb-item b.high { color: #c4462d; }
+.sb-item .week { opacity: .8; }
+.sb-item.stale { opacity: .6; }
+#sb-refresh { padding: 2px; }
+#sb-refresh svg { width: 13px; height: 13px; }
+#sb-refresh.spin svg { animation: git-spin .8s linear infinite; }
+
+/* ---------- SSH hosts ---------- */
+
+.hosts-head { padding-top: 10px; border-top: 1px solid var(--border); margin-top: 4px; }
+.hosts-title { cursor: pointer; }
+.hosts-title::after { content: ""; display: inline-block; margin-left: 6px; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
+.hosts-head.collapsed .hosts-title::after { transform: translateY(0) rotate(-45deg); }
+.hosts-actions { display: flex; gap: 2px; }
+#host-list { flex: none; max-height: 32vh; overflow-y: auto; overflow-x: hidden; padding-bottom: 6px; }
+.host-row .host-icon { color: var(--muted); display: inline-flex; }
+.host-row .host-icon svg { width: 16px; height: 16px; }
+.host-row.connected .host-icon { color: var(--running); }
+.host-row .meta { color: var(--muted); font-size: 12px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.host-group { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; padding: 8px 12px 2px; }
+.host-empty { color: var(--muted); font-size: 12.5px; padding: 4px 12px 8px; line-height: 1.5; }
+.host-empty a, .forget { color: var(--accent); cursor: pointer; }
+.host-empty a:hover, .forget:hover { text-decoration: underline; }
+
+.host-card { width: 600px; max-height: 88vh; overflow-y: auto; }
+.host-card textarea { border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font: inherit; color: var(--text); background: var(--main-bg); outline: none; resize: vertical; }
+.host-card textarea:focus { border-color: var(--accent); }
+.host-card label.narrow { flex: 0 0 80px; }
+.host-card .with-btn { display: flex; gap: 6px; }
+.host-card .with-btn input { flex: 1; min-width: 0; }
+.small-btn { border: 1px solid var(--border); background: var(--main-bg); border-radius: 8px; padding: 0 10px; cursor: pointer; }
+.small-btn:hover { background: var(--hover); }
+.field-hint { font-size: 11.5px; color: var(--muted); }
+.modal-actions .spacer { flex: 1; }
+.danger-link { background: none !important; border: 0 !important; color: #c4462d; cursor: pointer; padding: 7px 4px !important; }
+.danger-link:hover { text-decoration: underline; }
+.host-status { font-size: 12.5px; padding: 8px 10px; border-radius: 8px; background: var(--side-bg); white-space: pre-wrap; user-select: text; }
+.host-status.ok { color: var(--running); }
+.host-status.error { color: #c4462d; }
+.host-activity:empty { display: none; }
+.host-activity { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-height: 160px; overflow-y: auto; font-size: 12px; }
+.host-activity-title { color: var(--muted); margin-bottom: 4px; }
+.host-act { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
+.host-act .when { color: var(--muted); width: 32px; flex: none; }
+.host-act code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "Cascadia Mono", Consolas, monospace; user-select: text; }
+.host-act .result { color: var(--muted); flex: none; }
+.host-act.denied .result { color: #c4462d; }
+
+#ssh-prompt .modal-card { width: 480px; }
+#ssh-prompt input[type=password], #ssh-prompt input[type=text] { border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font: inherit; color: var(--text); background: var(--main-bg); outline: none; }
+#ssh-prompt input:focus { border-color: var(--accent); }
+.prompt-text { margin: 0; font-size: 13px; line-height: 1.5; }
+.prompt-text.muted { color: var(--muted); font-size: 12px; }
+.fingerprint { display: block; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; padding: 8px 10px; background: var(--side-bg); border-radius: 8px; word-break: break-all; user-select: text; }
+.fp-label { font-size: 12px; color: var(--muted); margin-bottom: -6px; }
+.danger-title { color: #c4462d; }
+
+#ssh-cards { position: fixed; right: 16px; bottom: calc(var(--statusbar-h) + 16px); z-index: 70; display: flex; flex-direction: column; gap: 10px; width: 440px; max-width: calc(100vw - 32px); }
+.ssh-card { background: var(--main-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; box-shadow: 0 12px 34px rgba(0, 0, 0, .18); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; animation: git-fade .15s ease-out; }
+.ssh-card-head { display: flex; gap: 8px; align-items: flex-start; line-height: 1.4; }
+.ssh-card-head .host-icon svg { width: 16px; height: 16px; color: var(--accent); margin-top: 1px; }
+.ssh-cmd { margin: 0; padding: 8px 10px; background: var(--side-bg); border-radius: 8px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; user-select: text; }
+.ssh-cwd { color: var(--muted); font-size: 12px; margin-top: -4px; }
+.ssh-card-actions { display: flex; gap: 8px; align-items: center; }
+.ssh-card-actions .spacer { flex: 1; }
+.ssh-card-actions button:not(.primary) { background: none; border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px; cursor: pointer; }
+.ssh-card-actions button:not(.primary):hover { background: var(--hover); }
+
+#host-toast { position: fixed; left: 50%; bottom: calc(var(--statusbar-h) + 18px); transform: translateX(-50%); z-index: 80; background: var(--text); color: var(--main-bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; max-width: 70vw; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
+#host-toast.error { background: #c4462d; color: #fff; }
+#ssh-prompt button.primary.danger { background: #c4462d; color: #fff; }
+
+/* A host in the sidebar unfolds like a project: its terminal and its agent sessions. */
+.host-row .host-fold { display: inline-flex; color: var(--muted); }
+.host-row .host-fold .chev { width: 14px; height: 14px; transition: transform .15s; }
+.host-row.collapsed .host-fold .chev { transform: rotate(-90deg); }
+.host-row:hover .meta { display: none; }
+.host-row.shown .host-icon { color: var(--accent); }
+.host-children { margin-left: 21px; padding-left: 8px; border-left: 1px solid var(--border); margin-bottom: 4px; }
+.host-child .agent-icon { display: inline-flex; }
+.agent-badge.ssh { color: var(--running); }

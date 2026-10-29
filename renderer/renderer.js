@@ -58,6 +58,10 @@ const AGENTS = {
   codex: { label: 'Codex', group: 'GPT', badge: '<svg class="agent-badge codex" viewBox="0 0 24 24"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>' }, // OpenAI mark
 };
 
+// SSH terminals aren't agents, but show in panes like them.
+const SSH_KIND = { label: 'SSH', group: 'Terminal', badge: '<svg class="agent-badge ssh" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>' };
+const agentInfo = (agent) => AGENTS[agent] || SSH_KIND;
+
 function findProject(p) {
   return state.projects.find((x) => norm(x.path) === norm(p));
 }
@@ -71,6 +75,7 @@ function findSession(sessionId) {
 }
 
 function sessionTitle(sessionId) {
+  if (sessionId?.startsWith('ssh:')) return hostTerminalTitle(sessionId); // hosts.js
   const s = findSession(sessionId);
   if (s) return s.title;
   const agent = state.terms.get(sessionId)?.agent || state.pendingNew.get(sessionId)?.agent;
@@ -82,10 +87,12 @@ function sessionTitle(sessionId) {
 function renderSidebar() {
   // Background refreshes would recreate the rename box and lose what's typed.
   if (state.renaming && document.activeElement?.classList.contains('rename-input')) return;
+  renderHosts(); // the hosts' terminals and sessions (hosts.js)
   const q = state.filter.toLowerCase();
   projectListEl.innerHTML = '';
 
   for (const p of state.projects) {
+    if (isHostWorkspace(p.path)) continue; // listed under its host (hosts.js)
     const nameHit = !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
     let sessions = p.sessions;
     if (q && !nameHit) sessions = sessions.filter((s) => (s.title || '').toLowerCase().includes(q));
@@ -372,7 +379,7 @@ function isOnDisk(sessionId) {
 }
 
 async function openSession(projectPath, sessionId, resume, { agent = 'claude', cwd } = {}) {
-  state.lastProject = projectPath;
+  if (!isHostWorkspace(projectPath)) state.lastProject = projectPath; // "New session" stays on projects
   if (state.terms.has(sessionId)) {
     const t = state.terms.get(sessionId);
     if (t.exited) await respawn(sessionId, isOnDisk(sessionId));
@@ -380,6 +387,15 @@ async function openSession(projectPath, sessionId, resume, { agent = 'claude', c
     return;
   }
 
+  makeTermEntry(sessionId, { projectPath, cwd, agent });
+  activate(sessionId);
+  if (!resume) state.pendingNew.set(sessionId, { projectPath, agent });
+  await respawn(sessionId, resume);
+  renderSidebar();
+}
+
+// A terminal for a session (an agent, or an SSH shell on a host), parked until a pane shows it.
+function makeTermEntry(sessionId, { projectPath, cwd, agent }) {
   const container = el('div', { class: 'term' });
   termStash.append(container);
   const term = new Terminal(termOptions());
@@ -413,7 +429,7 @@ async function openSession(projectPath, sessionId, resume, { agent = 'claude', c
       return false;
     }
     // Shift+Enter inserts a newline in the prompt (Claude reads Alt+Enter, Codex reads Ctrl+J).
-    if (e.shiftKey && e.key === 'Enter') {
+    if (e.shiftKey && e.key === 'Enter' && entry.agent !== 'ssh') {
       if (entry.termId) api.write(entry.termId, entry.agent === 'codex' ? '\n' : '\x1b\r');
       return false;
     }
@@ -426,11 +442,7 @@ async function openSession(projectPath, sessionId, resume, { agent = 'claude', c
   term.onData((d) => { if (entry.termId && !entry.exited) api.write(entry.termId, d); });
   term.onWriteParsed(() => scheduleScreenRead(entry));
   term.onResize(({ cols, rows }) => { if (entry.termId) api.resize(entry.termId, cols, rows); });
-
-  activate(sessionId);
-  if (!resume) state.pendingNew.set(sessionId, { projectPath, agent });
-  await respawn(sessionId, resume);
-  renderSidebar();
+  return entry;
 }
 
 // A new Codex session is re-keyed once its rollout file shows up, so look the id up by entry.
@@ -444,6 +456,7 @@ async function respawn(sessionId, resume) {
   if (!entry) return;
   if (entry.termId) { api.kill(entry.termId); state.termToSession.delete(entry.termId); }
   entry.termId = null;
+  if (entry.agent === 'ssh') { await connectHostShell(sessionId, entry); return; } // hosts.js
   if (!(await agentReady(entry))) return;
   hideMissing(entry);
   safeFit(entry);
@@ -564,10 +577,10 @@ function activate(sessionId, { focusInput = true } = {}) {
   $('#main-head').classList.toggle('idle', !entry);
   if (entry) {
     $('#head-title').textContent = sessionTitle(sessionId);
-    $('#head-path').textContent = `${AGENTS[entry.agent].label} · ${entry.cwd}`;
+    $('#head-path').textContent = `${agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}`;
     if (switching) { inputEl.value = entry.draft; autosizeInput(); renderAttachments(); }
     loadSettings(sessionId);
-    requestAnimationFrame(() => { safeFit(entry); if (focusInput) inputEl.focus(); });
+    requestAnimationFrame(() => { safeFit(entry); if (focusInput) (entry.agent === 'ssh' ? entry.term : inputEl).focus(); });
   } else {
     $('#head-title').textContent = '';
     $('#head-path').textContent = '';
@@ -632,7 +645,9 @@ api.onExit((termId, code) => {
     return;
   }
   entry.exited = true;
-  entry.term.write(`\r\n\x1b[90m[Process exited with code ${code} — press Enter to resume]\x1b[0m\r\n`);
+  entry.term.write(entry.agent === 'ssh'
+    ? '\r\n\x1b[90m[Disconnected — press Enter to reconnect]\x1b[0m\r\n'
+    : `\r\n\x1b[90m[Process exited with code ${code} — press Enter to resume]\x1b[0m\r\n`);
   renderComposer();
   renderSidebar();
 });
@@ -817,8 +832,8 @@ function updatePaneHeads() {
     if (!ui) continue;
     const entry = state.terms.get(leaf.session);
     ui.title.textContent = entry ? sessionTitle(leaf.session) : 'Empty pane';
-    ui.title.title = entry ? `${AGENTS[entry.agent].label} · ${entry.cwd}` : '';
-    ui.icon.innerHTML = entry ? AGENTS[entry.agent].badge : '';
+    ui.title.title = entry ? `${agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}` : '';
+    ui.icon.innerHTML = entry ? agentInfo(entry.agent).badge : '';
     ui.status.replaceChildren(...(entry && !entry.exited ? [statusEl(entry)] : []));
   }
 }
@@ -877,7 +892,7 @@ function renderEmptyPicker() {
   const sel = $('#empty-project');
   const current = sel.value || state.lastProject;
   sel.innerHTML = '';
-  for (const p of state.projects) sel.append(el('option', { value: p.path }, `${p.name}  —  ${p.path}`));
+  for (const p of state.projects) if (!isHostWorkspace(p.path)) sel.append(el('option', { value: p.path }, `${p.name}  —  ${p.path}`));
   sel.append(el('option', { value: '__add__' }, 'Add a project folder…'));
   if (current && findProject(current)) sel.value = findProject(current).path;
   for (const b of document.querySelectorAll('#agent-toggle button')) {
@@ -992,6 +1007,7 @@ $('#btn-settings').addEventListener('click', () => {
   $('#cfg-theme').value = state.config.theme;
   $('#cfg-font').value = state.config.fontSize;
   $('#cfg-tray').checked = state.config.closeToTray !== false;
+  $('#cfg-usage').checked = state.config.showUsage !== false;
   $('#settings').classList.remove('hidden');
 });
 $('#cfg-cancel').addEventListener('click', () => $('#settings').classList.add('hidden'));
@@ -1004,8 +1020,10 @@ $('#cfg-save').addEventListener('click', async () => {
     theme: $('#cfg-theme').value,
     fontSize: Math.min(28, Math.max(9, parseInt($('#cfg-font').value, 10) || 14)),
     closeToTray: $('#cfg-tray').checked,
+    showUsage: $('#cfg-usage').checked,
   });
   applyTheme();
+  renderUsage();
   $('#settings').classList.add('hidden');
 });
 
@@ -1319,7 +1337,7 @@ function currentSettings(entry) {
 
 async function loadSettings(sessionId) {
   const entry = state.terms.get(sessionId);
-  if (!entry) return;
+  if (!entry || entry.agent === 'ssh') return;
   const s = await api.sessionState(sessionId, entry.agent);
   // Once the file reports a different model (e.g. after the next reply), it supersedes the pick.
   if (entry.fileSettings.model !== undefined && s.model !== entry.fileSettings.model) delete entry.overrides.model;
@@ -1392,13 +1410,13 @@ function scheduleScreenRead(entry) {
 
 function renderComposer() {
   const entry = state.terms.get(state.active);
-  composerEl.classList.toggle('hidden', !entry);
-  if (!entry) return;
+  composerEl.classList.toggle('hidden', !entry || entry.agent === 'ssh');
+  if (!entry || entry.agent === 'ssh') return;
   const s = currentSettings(entry);
   const codex = entry.agent === 'codex';
   inputEl.placeholder = codex ? 'Ask Codex to do anything' : 'How can I help you today?';
   const proj = findProject(entry.projectPath);
-  $('#chip-project').textContent = `${proj?.name || entry.projectPath.split(/[\\/]/).pop()} ▾`;
+  $('#chip-project').textContent = `${hostNameFor(entry.projectPath) || proj?.name || entry.projectPath.split(/[\\/]/).pop()} ▾`;
   $('#chip-model').textContent = modelLabel(entry.agent, s.model);
   $('#chip-effort').textContent = s.effort ? effortLabel(s.effort) : '';
   $('#chip-mode').textContent = MODE_LABELS[s.mode] || (codex ? 'Permissions' : 'Manual');
@@ -2049,6 +2067,65 @@ async function codexEffortMenu(e, entry) {
   })), rect);
 }
 
+// ---------- usage bar ----------
+
+// Plan usage per agent: the 5-hour window first (percent used, time until it resets), then the
+// weekly one. Claude's numbers come from Crew's status line hook, Codex's from its own logs.
+let usage = {};
+
+function untilText(ms) {
+  const m = Math.max(1, Math.round(ms / 60000));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+const windowName = (min) => (min === 300 ? '5-hour' : min === 10080 ? 'Weekly' : min % 1440 === 0 ? `${min / 1440}-day` : `${Math.round(min / 60)}-hour`);
+
+function usageItem(agent, u) {
+  const now = Date.now();
+  // A window whose reset time has passed starts again from zero.
+  const wins = u.windows.map((w) => (w.resetsAt && w.resetsAt <= now ? { ...w, used: 0, resetsAt: null } : w));
+  const [first, second] = wins;
+  const pct = (w) => `${Math.round(w.used)}%`;
+  const level = (w) => (w.used >= 90 ? 'high' : w.used >= 70 ? 'warn' : '');
+  const lines = [`${AGENTS[agent].label}${u.plan ? ` (${u.plan} plan)` : ''}`];
+  for (const w of wins) {
+    lines.push(`${windowName(w.minutes)} limit: ${pct(w)} used${w.resetsAt ? `, resets in ${untilText(w.resetsAt - now)} (${new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })})` : ''}`);
+  }
+  lines.push(`Updated ${relTime(u.at) === 'now' ? 'just now' : `${relTime(u.at)} ago`}`);
+  const item = el('span', { class: `sb-item${now - u.at > 6 * 3600e3 ? ' stale' : ''}`, title: lines.join('\n') },
+    el('span', { class: 'agent-icon', html: AGENTS[agent].badge }),
+    el('b', { class: level(first) }, pct(first)),
+    first.resetsAt ? el('span', {}, untilText(first.resetsAt - now)) : null);
+  if (second) item.append(el('span', { class: 'week' }, `· ${second.minutes === 10080 ? 'week' : windowName(second.minutes)} ${pct(second)}`));
+  return item;
+}
+
+function renderUsage() {
+  const on = state.config.showUsage !== false;
+  if (document.body.classList.contains('no-statusbar') === on) {
+    document.body.classList.toggle('no-statusbar', !on);
+    requestAnimationFrame(() => { for (const t of state.terms.values()) safeFit(t); }); // the bar's height comes from the terminals
+  }
+  if (!on) return;
+  const items = Object.keys(AGENTS).filter((a) => usage[a]?.windows?.length).map((a) => usageItem(a, usage[a]));
+  $('#sb-usage').replaceChildren(...(items.length ? items : [el('span', {}, 'Checking plan usage…')]));
+}
+
+// Main keeps the numbers and refreshes them in the background (it tells us when they change);
+// `force` waits for a fresh check, for the refresh button.
+async function loadUsage(force = false) {
+  if (state.config.showUsage === false) return;
+  if (force) $('#sb-refresh').classList.add('spin');
+  try { usage = await api.getUsage(force); } catch { /* keep the last numbers */ }
+  if (force) $('#sb-refresh').classList.remove('spin');
+  renderUsage();
+}
+$('#sb-refresh').addEventListener('click', () => loadUsage(true));
+api.onUsageChanged(() => loadUsage());
+
 // ---------- boot ----------
 
 (async () => {
@@ -2061,4 +2138,7 @@ async function codexEffortMenu(e, entry) {
   if (localStorage.getItem('browserOpen') === '1') openBrowser();
   api.onProjectsChanged(refresh);
   setInterval(renderSidebar, 60_000); // keep relative times fresh
+  loadUsage();
+  setInterval(() => loadUsage(), 30_000); // also counts the reset times down
+  addEventListener('focus', () => loadUsage());
 })();

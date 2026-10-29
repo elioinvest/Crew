@@ -22,6 +22,27 @@ contextBridge.exposeInMainWorld('api', {
   git: (cwd, args, input) => ipcRenderer.invoke('git:run', cwd, args, input),
   gitIgnore: (root, pattern) => ipcRenderer.invoke('git:ignore', root, pattern),
 
+  listHosts: () => ipcRenderer.invoke('hosts:list'),
+  saveHost: (h) => ipcRenderer.invoke('hosts:save', h),
+  deleteHost: (id) => ipcRenderer.invoke('hosts:delete', id),
+  testHost: (id) => ipcRenderer.invoke('hosts:test', id),
+  disconnectHost: (id) => ipcRenderer.invoke('hosts:disconnect', id),
+  hostWorkspace: (id) => ipcRenderer.invoke('hosts:workspace', id),
+  sshShell: (opts) => ipcRenderer.invoke('ssh:shell', opts),
+  hostActivity: (id) => ipcRenderer.invoke('hosts:activity', id),
+  importHosts: () => ipcRenderer.invoke('hosts:import'),
+  pickKey: () => ipcRenderer.invoke('hosts:pick-key'),
+  installSkill: () => ipcRenderer.invoke('hosts:install-skill'),
+  canSeal: () => ipcRenderer.invoke('hosts:can-seal'),
+  onHostsChanged: (cb) => ipcRenderer.on('ssh:hosts-changed', () => cb()),
+  onHostActivity: (cb) => ipcRenderer.on('ssh:activity', (_e, id) => cb(id)),
+  onSshPrompt: (cb) => ipcRenderer.on('ssh:prompt', (_e, p) => cb(p)),
+  onSshPromptCancel: (cb) => ipcRenderer.on('ssh:prompt-cancel', (_e, id) => cb(id)),
+  answerSsh: (id, answer) => ipcRenderer.send('ssh:answer', id, answer),
+
+  getUsage: (force) => ipcRenderer.invoke('usage:get', force),
+  onUsageChanged: (cb) => ipcRenderer.on('usage:changed', () => cb()),
+
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
 

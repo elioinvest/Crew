@@ -26,6 +26,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 app.on('second-instance', () => showWindow());
 
+// Saved SSH hosts for the agents (after userData is settled above: it keeps its files there).
+const ssh = require('./ssh');
+
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_SESSIONS = path.join(CODEX_HOME, 'sessions');
@@ -54,6 +57,7 @@ const defaultConfig = {
   collapsed: {},
   projectOrder: [], // project paths in sidebar order, set by dragging
   closeToTray: true, // closing the window keeps Crew (and running sessions) in the tray
+  showUsage: true, // plan usage bar at the bottom; adds a status line to Claude sessions Crew starts
   trayHintShown: false,
 };
 
@@ -318,7 +322,8 @@ function scanProjects() {
     if (!projects.has(key)) projects.set(key, { path: p, name: path.basename(p) || p, sessions: [] });
   }
 
-  const hidden = new Set(config.hiddenProjects.map(normPath));
+  // The usage check's folder too, in case Claude ever saves a transcript for it.
+  const hidden = new Set([...config.hiddenProjects, path.join(app.getPath('userData'), 'usage-probe')].map(normPath));
   const list = [...projects.values()].filter((p) => !hidden.has(normPath(p.path)));
   for (const p of list) {
     p.sessions.sort((a, b) => b.mtime - a.mtime);
@@ -451,26 +456,32 @@ function agentArgv(agent, id, resume) {
     const extra = splitArgs(config.codexArgs);
     return [config.codexCommand || 'codex', ...(resume ? ['resume', ...extra, id] : extra)];
   }
-  return [config.claudeCommand || 'claude', ...splitArgs(config.extraArgs), ...(resume ? ['--resume', id] : ['--session-id', id])];
+  const usage = config.showUsage !== false && usageHookReady() ? ['--settings', usagePaths().settings] : [];
+  return [config.claudeCommand || 'claude', ...usage, ...splitArgs(config.extraArgs), ...(resume ? ['--resume', id] : ['--session-id', id])];
 }
 
 // claude/codex are usually .cmd shims on Windows; go through cmd.exe so PATHEXT resolution works.
+// The line after /c is wrapped in one more pair of quotes, which /s strips, so arguments quoted
+// for spaces (e.g. a path under "Claude Terminal") reach the agent intact. That only works if
+// the arguments go to cmd.exe verbatim: as a string for node-pty, and with
+// windowsVerbatimArguments for child_process (both would otherwise re-escape the quotes).
 function shellCommand(argv) {
   if (process.platform === 'win32') {
-    return [process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', argv.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')]];
+    return [process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', `"${argv.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')}"`]];
   }
   return [process.env.SHELL || '/bin/bash', ['-lc', argv.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ')]];
 }
 
-function startPty(file, fileArgs, { cwd, cols, rows, meta }) {
+function startPty(file, fileArgs, { cwd, cols, rows, meta, env = cleanEnv() }) {
   const termId = crypto.randomUUID();
   const workDir = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
-  const proc = pty.spawn(file, fileArgs, {
+  const verbatim = process.platform === 'win32' && file === (process.env.COMSPEC || 'cmd.exe');
+  const proc = pty.spawn(file, verbatim ? fileArgs.join(' ') : fileArgs, {
     name: 'xterm-256color',
     cols: cols || 120,
     rows: rows || 30,
     cwd: workDir,
-    env: cleanEnv(),
+    env,
     useConpty: true,
   });
 
@@ -486,11 +497,29 @@ function startPty(file, fileArgs, { cwd, cols, rows, meta }) {
 ipcMain.handle('pty:spawn', (_e, { agent = 'claude', cwd, sessionId, resume, cols, rows }) => {
   const id = sessionId || crypto.randomUUID();
   const [file, fileArgs] = shellCommand(agentArgv(agent, id, resume));
-  const termId = startPty(file, fileArgs, { cwd, cols, rows, meta: { sessionId: id, agent } });
+  // Agent sessions get crew-ssh, for the hosts saved in Crew.
+  const env = ssh.sessionEnv(cleanEnv(), id, agent);
+  const termId = startPty(file, fileArgs, { cwd, cols, rows, env, meta: { sessionId: id, agent } });
   return { termId, sessionId: id, startedAt: Date.now() };
 });
 
 // Runs the agent's official installer in the pane, so its output (and any prompts) are visible.
+// The user's terminal on a saved host: an SSH shell that's a terminal like the others. The
+// window picks the id first, so nothing the host prints before the reply is lost.
+ipcMain.handle('ssh:shell', async (_e, { hostId, termId, cols, rows }) => {
+  const send = (ch, ...a) => win && !win.isDestroyed() && win.webContents.send(ch, termId, ...a);
+  try {
+    const proc = await ssh.openShell(hostId, cols || 120, rows || 30, (d) => send('pty:data', d), (code) => {
+      ptys.delete(termId);
+      send('pty:exit', code);
+    });
+    ptys.set(termId, { proc, sessionId: `ssh:${hostId}`, agent: 'ssh' });
+    return { termId };
+  } catch (e) {
+    return { error: e.message || String(e) };
+  }
+});
+
 ipcMain.handle('pty:install', (_e, { agent, cols, rows }) => {
   const { argv } = INSTALL[agent] || INSTALL.claude;
   const [file, fileArgs] = argv[0] === 'npm' ? shellCommand(argv) : [argv[0], argv.slice(1)];
@@ -658,7 +687,7 @@ function runCommand(argv) {
   return new Promise((resolve) => {
     const [file, args] = shellCommand(argv);
     let output = '';
-    const child = spawn(file, args, { env: cleanEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { env: cleanEnv(), windowsHide: true, windowsVerbatimArguments: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', (d) => { output += d; });
     child.stderr.on('data', (d) => { output += d; });
     child.on('error', (e) => resolve({ code: -1, output: e.message }));
@@ -712,6 +741,278 @@ ipcMain.handle('sessions:delete', async (_e, id, title, agent) => {
   if (fs.existsSync(sidecar)) await shell.trashItem(sidecar).catch(() => {});
   metaCache.delete(file);
   return true;
+});
+
+// ---------- plan usage ----------
+
+// Claude Code gives its status line the plan's rate limits (5-hour and weekly windows). The
+// sessions Crew starts get a status line (statusline.js, via --settings) that saves them to
+// usage-claude.json and then runs the user's own status line. Codex logs its limits itself.
+function usagePaths() {
+  const dir = app.getPath('userData');
+  return {
+    file: path.join(dir, 'usage-claude.json'),
+    script: path.join(dir, 'crew-statusline.js'),
+    cmd: path.join(dir, 'crew-statusline.cmd'),
+    settings: path.join(dir, 'crew-claude-settings.json'),
+  };
+}
+
+let usageHook = null; // true once the hook files are written
+function usageHookReady() {
+  if (usageHook !== null) return usageHook;
+  try {
+    const p = usagePaths();
+    // Copied out of the app archive: Claude Code runs it with Crew's own executable in Node mode.
+    fs.writeFileSync(p.script, fs.readFileSync(path.join(__dirname, 'statusline.js')));
+    const fwd = (s) => s.replace(/\\/g, '/');
+    let command;
+    if (process.platform === 'win32') {
+      fs.writeFileSync(p.cmd, `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${process.execPath}" "${p.script}" "${p.file}"\r\n`);
+      command = `"${fwd(p.cmd)}"`;
+    } else {
+      command = `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${p.script}" "${p.file}"`;
+    }
+    // Keep the user's padding so their status line sits where it always has.
+    const own = readJson(path.join(os.homedir(), '.claude', 'settings.json'))?.statusLine || {};
+    const statusLine = { type: 'command', command, ...(own.padding != null ? { padding: own.padding } : {}) };
+    fs.writeFileSync(p.settings, JSON.stringify({ statusLine }, null, 2));
+    usageHook = true;
+  } catch {
+    usageHook = false;
+  }
+  return usageHook;
+}
+
+// Windows are { used: percent, resetsAt: epoch ms, minutes: window length }.
+function claudeUsage() {
+  const j = readJson(usagePaths().file);
+  if (!j?.rate_limits) return null;
+  const win = (w, minutes) => (w && w.used_percentage != null ? { used: w.used_percentage, resetsAt: w.resets_at * 1000, minutes } : null);
+  const windows = [win(j.rate_limits.five_hour, 300), win(j.rate_limits.seven_day, 10080)].filter(Boolean);
+  return windows.length ? { at: j.at, windows } : null;
+}
+
+// The newest `rate_limits` Codex wrote into a session log (with each token count event).
+function codexUsage() {
+  const files = [];
+  const listDir = (d) => { try { return fs.readdirSync(d).sort().reverse(); } catch { return []; } };
+  for (const y of listDir(CODEX_SESSIONS)) {
+    for (const m of listDir(path.join(CODEX_SESSIONS, y))) {
+      for (const d of listDir(path.join(CODEX_SESSIONS, y, m))) {
+        const dir = path.join(CODEX_SESSIONS, y, m, d);
+        for (const f of listDir(dir)) if (f.endsWith('.jsonl')) files.push(path.join(dir, f));
+        if (files.length >= 40) break;
+      }
+      if (files.length >= 40) break;
+    }
+    if (files.length >= 40) break;
+  }
+  const byMtime = files.map((f) => { try { return [f, fs.statSync(f).mtimeMs]; } catch { return [f, 0]; } }).sort((a, b) => b[1] - a[1]);
+  for (const [f] of byMtime.slice(0, 15)) {
+    let text;
+    try {
+      const fd = fs.openSync(f, 'r');
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(size, 1024 * 1024);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - len);
+      fs.closeSync(fd);
+      text = buf.toString('utf8');
+    } catch { continue; }
+    const lines = text.split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"rate_limits":{')) continue;
+      let j;
+      try { j = JSON.parse(lines[i]); } catch { continue; }
+      const rl = j.payload?.rate_limits || j.payload?.info?.rate_limits;
+      const win = (w) => (w && w.used_percent != null ? { used: w.used_percent, resetsAt: w.resets_at ? w.resets_at * 1000 : null, minutes: w.window_minutes } : null);
+      const windows = [win(rl?.primary), win(rl?.secondary)].filter(Boolean);
+      if (windows.length) return { at: Date.parse(j.timestamp) || 0, plan: rl.plan_type || null, windows };
+    }
+  }
+  return null;
+}
+
+// Codex's current limits, asked of Codex itself: its app-server answers account/rateLimits/read
+// by fetching them from OpenAI with Codex's own sign-in.
+function codexLiveUsage() {
+  return new Promise((resolve) => {
+    const [file, args] = shellCommand([config.codexCommand || 'codex', 'app-server']);
+    let child;
+    try {
+      child = spawn(file, args, { env: cleanEnv(), windowsHide: true, windowsVerbatimArguments: process.platform === 'win32', stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch { resolve(null); return; }
+    let buf = '';
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { child.kill(); } catch { /* gone */ }
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), 20000);
+    const send = (m) => { try { child.stdin.write(`${JSON.stringify(m)}\n`); } catch { /* exited */ } };
+    child.on('error', () => finish(null));
+    child.on('close', () => finish(null));
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        let m;
+        try { m = JSON.parse(line); } catch { continue; }
+        if (m.id === 1) {
+          send({ method: 'initialized' });
+          send({ id: 2, method: 'account/rateLimits/read' });
+        } else if (m.id === 2) {
+          const rl = m.result?.rateLimits;
+          const win = (w) => (w && w.usedPercent != null ? { used: w.usedPercent, resetsAt: w.resetsAt ? w.resetsAt * 1000 : null, minutes: w.windowDurationMins } : null);
+          const windows = [win(rl?.primary), win(rl?.secondary)].filter(Boolean);
+          finish(windows.length ? { at: Date.now(), plan: rl.planType || null, windows } : null);
+        }
+      }
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'crew', title: 'Crew', version: app.getVersion() }, capabilities: { experimentalApi: true } } });
+  });
+}
+
+// Claude Code has no command that prints plan usage, so this opens it in a hidden terminal, runs
+// /usage and reads the "Current session" and "Current week" bars off the screen. A headless
+// xterm renders the output (redraws update only changed characters). The marker variable keeps
+// Claude from saving a transcript, so the check never shows up as a session.
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// "7:50pm", "Nov 2, 7pm" or "Nov 2 at 7:30am", in local time.
+function parseResetTime(text, now = Date.now()) {
+  const m = /(?:([A-Za-z]{3})[a-z]*\s+(\d{1,2}),?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(text || '');
+  if (!m) return null;
+  const d = new Date(now);
+  d.setSeconds(0, 0);
+  d.setHours((+m[3] % 12) + (m[5].toLowerCase() === 'pm' ? 12 : 0), +(m[4] || 0));
+  if (m[1]) {
+    const month = MONTHS.indexOf(m[1].toLowerCase());
+    if (month < 0) return null;
+    d.setMonth(month, +m[2]);
+    if (d.getTime() < now - 86400e3) d.setFullYear(d.getFullYear() + 1);
+  } else if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+function parseClaudeUsageScreen(text) {
+  const bar = (label) => {
+    const m = new RegExp(`${label}[^\\n]*\\n?[^%]*?(\\d+(?:\\.\\d+)?)%\\s*used[\\s\\S]*?Resets\\s+([^\\n(]+)`, 'i').exec(text);
+    return m ? { used: +m[1], resetsAt: parseResetTime(m[2]) } : null;
+  };
+  const session = bar('Current session');
+  const week = bar('Current week \\(all models\\)') || bar('Current week');
+  const windows = [session && { ...session, minutes: 300 }, week && { ...week, minutes: 10080 }].filter(Boolean);
+  if (!windows.length) return null;
+  const plan = /Claude (Pro|Max|Team|Enterprise)\b/.exec(text)?.[1] || null;
+  return { at: Date.now(), plan, windows };
+}
+
+function claudeProbeUsage() {
+  return new Promise((resolve) => {
+    const { Terminal } = require('@xterm/headless');
+    const cols = 120;
+    const rows = 50;
+    const term = new Terminal({ cols, rows, allowProposedApi: true });
+    const cwd = path.join(app.getPath('userData'), 'usage-probe');
+    try { fs.mkdirSync(cwd, { recursive: true }); } catch { /* the spawn below fails instead */ }
+    const [file, args] = shellCommand([splitArgs(config.claudeCommand || 'claude')[0] || 'claude']);
+    let proc;
+    try {
+      proc = pty.spawn(file, process.platform === 'win32' ? args.join(' ') : args, {
+        name: 'xterm-256color', cols, rows, cwd, useConpty: true,
+        env: { ...cleanEnv(), CLAUDE_CODE_CHILD_SESSION: '1' },
+      });
+    } catch { resolve(null); return; }
+    const screen = () => { // what's on screen now, not the scrollback
+      const b = term.buffer.active;
+      const out = [];
+      for (let i = b.baseY; i < b.baseY + rows; i++) out.push(b.getLine(i)?.translateToString(true) || '');
+      return out.join('\n');
+    };
+    const everything = () => { // with the scrollback, where the header (and the plan name) is
+      const b = term.buffer.active;
+      const out = [];
+      for (let i = 0; i < b.length; i++) out.push(b.getLine(i)?.translateToString(true) || '');
+      return out.join('\n');
+    };
+    let lastKey = 0;
+    let step = 'start';
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      clearInterval(tick);
+      clearTimeout(timer);
+      try { proc.write('\x1b'); } catch { /* exited */ }
+      setTimeout(() => { try { proc.kill(); } catch { /* gone */ } term.dispose(); }, 300);
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish(null), 35000);
+    proc.onData((d) => term.write(d));
+    proc.onExit(() => finish(null));
+    let readyAt = 0;
+    const tick = setInterval(() => {
+      const text = screen();
+      const trustPrompt = /trust this folder|Quick safety check/i.test(text);
+      if (trustPrompt) {
+        // Only ever Crew's own empty folder. The prompt starts on "No, exit": move to "Yes" first.
+        if (Date.now() - lastKey < 600) return;
+        lastKey = Date.now();
+        const selected = /❯\s*([^\n]*)/.exec(text)?.[1] || '';
+        if (/^\s*(\d\.\s*)?Yes/i.test(selected)) { proc.write('\r'); step = 'start'; readyAt = 0; } else proc.write('\x1b[B');
+      } else if (step === 'start' && /Claude Code v\d/.test(text) && /❯/.test(text)) {
+        readyAt = readyAt || Date.now();
+        if (Date.now() - readyAt > 1500) { proc.write('/usage'); step = 'typed'; readyAt = Date.now(); }
+      } else if (step === 'typed' && Date.now() - readyAt > 700) {
+        proc.write('\r');
+        step = 'sent';
+      } else if (step === 'sent') {
+        // Both bars, or just one once the screen has had time to settle (plans without a weekly bar).
+        const u = parseClaudeUsageScreen(text.slice(Math.max(0, text.lastIndexOf('Current session'))));
+        if (u && (u.windows.length >= 2 || Date.now() - readyAt > 8000)) finish({ ...u, plan: u.plan || /Claude (Pro|Max|Team|Enterprise)\b/.exec(everything())?.[1] || null });
+      }
+    }, 400);
+  });
+}
+
+// Live numbers are cached and refreshed in the background; the status line hook and Codex's
+// logs fill in when a live check fails, and whichever reading is newest wins.
+const usageCache = { claude: null, codex: null };
+const usageRefreshing = {};
+const usageChecked = {};
+const USAGE_EVERY = { claude: 5 * 60e3, codex: 2 * 60e3 };
+const newest = (...xs) => xs.filter(Boolean).sort((a, b) => b.at - a.at)[0] || null;
+
+async function refreshUsage(agent, force) {
+  if (usageRefreshing[agent]) return usageRefreshing[agent];
+  if (!force && Date.now() - (usageChecked[agent] || 0) < USAGE_EVERY[agent]) return null;
+  usageChecked[agent] = Date.now();
+  usageRefreshing[agent] = (async () => {
+    try {
+      const live = agent === 'claude' ? await claudeProbeUsage() : await codexLiveUsage();
+      if (live) usageCache[agent] = live;
+    } catch { /* keep what we had */ }
+    usageRefreshing[agent] = null;
+    if (win && !win.isDestroyed()) win.webContents.send('usage:changed');
+  })();
+  return usageRefreshing[agent];
+}
+
+ipcMain.handle('usage:get', async (_e, force) => {
+  if (config.showUsage === false) return {};
+  const pending = [refreshUsage('codex', force), refreshUsage('claude', force)];
+  if (force) await Promise.all(pending);
+  return {
+    claude: newest(usageCache.claude, claudeUsage()),
+    codex: newest(usageCache.codex, codexUsage()),
+  };
 });
 
 // ---------- git ----------
@@ -881,12 +1182,14 @@ app.on('before-quit', () => {
   if (quitting === 'done') return;
   quitting = 'done';
   killAllPtys();
+  ssh.shutdown();
   // Last resort: if anything still holds the process, leave anyway.
   setTimeout(() => app.exit(0), 3000).unref();
 });
 
 app.whenReady().then(() => {
   createWindow();
+  ssh.init(() => win);
   createTray();
   startWatcher();
   cleanAttachments();
