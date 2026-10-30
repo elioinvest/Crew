@@ -40,7 +40,6 @@ const ZH = {
   'Claude command': 'Claude 命令', 'Claude arguments': 'Claude 参数', 'Codex command': 'Codex 命令', 'Codex arguments': 'Codex 参数', 'Theme': '主题', 'Light': '浅色', 'Dark': '深色',
   'Font size': '字体大小', 'Language': '语言', 'Automatic': '自动', 'Keep running in the tray when the window is closed': '关闭窗口时在托盘中继续运行',
   'Show plan usage at the bottom (Claude sessions Crew starts get a status line hook that records it)': '在底部显示套餐用量（Crew 启动的 Claude 会话会加载一个记录用量的状态栏钩子）',
-  "Keep ego lite minimized while agents work, so it doesn't come in front of you": '智能体工作时让 ego lite 保持最小化，不弹到你面前',
   'ego lite: the browser for agents': 'ego lite：智能体的浏览器', '✓ ego lite is installed': '✓ 已安装 ego lite', "✗ ego lite isn't installed": '✗ 未安装 ego lite',
   '✓ Official skill installed for Claude Code and Codex': '✓ 已为 Claude Code 和 Codex 安装官方技能', '✓ Official skill installed for Claude Code only': '✓ 仅为 Claude Code 安装了官方技能',
   '✓ Official skill installed for Codex only': '✓ 仅为 Codex 安装了官方技能', '✗ Official skill not installed': '✗ 未安装官方技能',

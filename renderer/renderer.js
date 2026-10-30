@@ -1045,9 +1045,7 @@ async function refreshEgo() {
       : '✗ Official skill not installed';
   $('#ego-skill').classList.toggle('danger', !s.skill.claude && !s.skill.codex);
   $('#ego-setup').classList.toggle('hidden', s.installed && both);
-  $('#cfg-ego-min').checked = s.keepMinimized;
 }
-$('#cfg-ego-min').addEventListener('change', (e) => api.setEgoKeepMinimized(e.target.checked));
 $('#ego-setup').addEventListener('click', () => { $('#settings').classList.add('hidden'); setUpEgo(); });
 $('#ego-check').addEventListener('click', () => refreshEgo());
 

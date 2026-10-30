@@ -52,7 +52,6 @@ contextBridge.exposeInMainWorld('api', {
   onUsageChanged: (cb) => ipcRenderer.on('usage:changed', () => cb()),
 
   egoStatus: () => ipcRenderer.invoke('ego:status'),
-  setEgoKeepMinimized: (on) => ipcRenderer.invoke('ego:keep-minimized', on),
 
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),

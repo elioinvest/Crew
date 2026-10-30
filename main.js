@@ -62,7 +62,6 @@ const defaultConfig = {
   projectOrder: [], // project paths in sidebar order, set by dragging
   closeToTray: true, // closing the window keeps Crew (and running sessions) in the tray
   language: 'auto', // 'auto' (follows Windows), 'en' or 'zh'
-  egoKeepMinimized: true, // minimize ego lite windows that open while agents work (browser.js)
   egoSetupOffered: false, // asked once at startup whether to set up ego lite
   showUsage: true, // plan usage bar at the bottom; adds a status line to Claude sessions Crew starts
   trayHintShown: false,
@@ -1211,7 +1210,6 @@ app.on('before-quit', () => {
   killAllPtys();
   ssh.shutdown();
   agents.shutdown();
-  browserForAgents.shutdown();
   // Last resort: if anything still holds the process, leave anyway.
   setTimeout(() => app.exit(0), 3000).unref();
 });
@@ -1224,10 +1222,7 @@ app.whenReady().then(() => {
     onRunDone: () => refreshUsage('claude', true).then(() => refreshUsage('codex', true)), // runs spend quota
   });
   ssh.registerOps(agents.ops);
-  browserForAgents.init({
-    commandExists, cleanEnv, getConfig: () => config,
-    setConfig: (patch) => { config = { ...config, ...patch }; saveConfig(config); },
-  });
+  browserForAgents.init({ commandExists, cleanEnv });
   createTray();
   startWatcher();
   cleanAttachments();
