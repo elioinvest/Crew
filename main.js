@@ -30,6 +30,8 @@ app.on('second-instance', () => showWindow());
 const ssh = require('./ssh');
 // Agents the sessions can hand work to by @-mention (crew ask …), on the same pipe as crew-ssh.
 const agents = require('./agents');
+// ego lite, the agents' browser: its official skill and status (Settings).
+const browserForAgents = require('./browser');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -60,6 +62,8 @@ const defaultConfig = {
   projectOrder: [], // project paths in sidebar order, set by dragging
   closeToTray: true, // closing the window keeps Crew (and running sessions) in the tray
   language: 'auto', // 'auto' (follows Windows), 'en' or 'zh'
+  egoKeepMinimized: true, // minimize ego lite windows that open while agents work (browser.js)
+  egoSetupOffered: false, // asked once at startup whether to set up ego lite
   showUsage: true, // plan usage bar at the bottom; adds a status line to Claude sessions Crew starts
   trayHintShown: false,
 };
@@ -467,13 +471,15 @@ ipcMain.handle('agent:check', (_e, agent) => {
 
 // Claude takes the session id up front; Codex picks its own, so a new Codex session
 // is matched to its rollout file later by cwd and start time (see the renderer's refresh()).
-function agentArgv(agent, id, resume) {
+// A new session can start with a first prompt, which both CLIs take as their last argument.
+function agentArgv(agent, id, resume, prompt) {
+  const first = !resume && prompt ? [prompt.replace(/\s*\r?\n\s*/g, ' ')] : []; // one line for cmd.exe
   if (agent === 'codex') {
     const extra = splitArgs(config.codexArgs);
-    return [config.codexCommand || 'codex', ...(resume ? ['resume', ...extra, id] : extra)];
+    return [config.codexCommand || 'codex', ...(resume ? ['resume', ...extra, id] : [...extra, ...first])];
   }
   const usage = config.showUsage !== false && usageHookReady() ? ['--settings', usagePaths().settings] : [];
-  return [config.claudeCommand || 'claude', ...usage, ...splitArgs(config.extraArgs), ...(resume ? ['--resume', id] : ['--session-id', id])];
+  return [config.claudeCommand || 'claude', ...usage, ...splitArgs(config.extraArgs), ...(resume ? ['--resume', id] : ['--session-id', id, ...first])];
 }
 
 // claude/codex are usually .cmd shims on Windows; go through cmd.exe so PATHEXT resolution works.
@@ -510,9 +516,9 @@ function startPty(file, fileArgs, { cwd, cols, rows, meta, env = cleanEnv() }) {
   return termId;
 }
 
-ipcMain.handle('pty:spawn', (_e, { agent = 'claude', cwd, sessionId, resume, cols, rows }) => {
+ipcMain.handle('pty:spawn', (_e, { agent = 'claude', cwd, sessionId, resume, cols, rows, prompt }) => {
   const id = sessionId || crypto.randomUUID();
-  const [file, fileArgs] = shellCommand(agentArgv(agent, id, resume));
+  const [file, fileArgs] = shellCommand(agentArgv(agent, id, resume, prompt));
   // Agent sessions get crew-ssh, for the hosts saved in Crew.
   const env = ssh.sessionEnv(cleanEnv(), id, agent);
   const termId = startPty(file, fileArgs, { cwd, cols, rows, env, meta: { sessionId: id, agent } });
@@ -1205,6 +1211,7 @@ app.on('before-quit', () => {
   killAllPtys();
   ssh.shutdown();
   agents.shutdown();
+  browserForAgents.shutdown();
   // Last resort: if anything still holds the process, leave anyway.
   setTimeout(() => app.exit(0), 3000).unref();
 });
@@ -1217,6 +1224,10 @@ app.whenReady().then(() => {
     onRunDone: () => refreshUsage('claude', true).then(() => refreshUsage('codex', true)), // runs spend quota
   });
   ssh.registerOps(agents.ops);
+  browserForAgents.init({
+    commandExists, cleanEnv, getConfig: () => config,
+    setConfig: (patch) => { config = { ...config, ...patch }; saveConfig(config); },
+  });
   createTray();
   startWatcher();
   cleanAttachments();

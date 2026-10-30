@@ -914,3 +914,11 @@ body.resizing-x { cursor: col-resize; }
 .field-hint.danger { color: #c4462d; }
 .modal-actions button.primary:disabled { opacity: .4; cursor: default; }
 :root[lang="zh-CN"] .pane.focused .pane-head::after { content: "当前"; }
+
+/* Settings: ego lite as the agents' browser */
+.ego-box { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.ego-actions { display: flex; gap: 6px; }
+.ego-actions .small-btn { padding: 4px 12px; }
+.ego-title { font-weight: 600; font-size: 13px; color: var(--text); }
+.ego-line { font-size: 12.5px; color: var(--running); }
+.ego-line.danger { color: #c4462d; }

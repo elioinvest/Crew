@@ -378,7 +378,8 @@ function isOnDisk(sessionId) {
   return !!findSession(sessionId);
 }
 
-async function openSession(projectPath, sessionId, resume, { agent = 'claude', cwd } = {}) {
+// `prompt`: a new session's first message, given to the agent as it starts.
+async function openSession(projectPath, sessionId, resume, { agent = 'claude', cwd, prompt } = {}) {
   if (!isHostWorkspace(projectPath)) state.lastProject = projectPath; // "New session" stays on projects
   if (state.terms.has(sessionId)) {
     const t = state.terms.get(sessionId);
@@ -387,7 +388,7 @@ async function openSession(projectPath, sessionId, resume, { agent = 'claude', c
     return;
   }
 
-  makeTermEntry(sessionId, { projectPath, cwd, agent });
+  makeTermEntry(sessionId, { projectPath, cwd, agent }).firstPrompt = prompt;
   activate(sessionId);
   if (!resume) state.pendingNew.set(sessionId, { projectPath, agent });
   await respawn(sessionId, resume);
@@ -462,7 +463,9 @@ async function respawn(sessionId, resume) {
   safeFit(entry);
   const { termId, startedAt } = await api.spawn({
     agent: entry.agent, cwd: entry.cwd, sessionId, resume, cols: entry.term.cols, rows: entry.term.rows,
+    prompt: resume ? undefined : entry.firstPrompt,
   });
+  entry.firstPrompt = undefined; // sent once
   entry.termId = termId;
   entry.startedAt = startedAt;
   entry.live = {};
@@ -1009,6 +1012,7 @@ $('#btn-settings').addEventListener('click', () => {
   $('#cfg-font').value = state.config.fontSize;
   $('#cfg-tray').checked = state.config.closeToTray !== false;
   $('#cfg-usage').checked = state.config.showUsage !== false;
+  refreshEgo();
   $('#settings').classList.remove('hidden');
 });
 $('#cfg-cancel').addEventListener('click', () => $('#settings').classList.add('hidden'));
@@ -1029,6 +1033,51 @@ $('#cfg-save').addEventListener('click', async () => {
   renderUsage();
   $('#settings').classList.add('hidden');
 });
+
+// ego lite as the agents' browser: whether it and its official skill are installed (browser.js).
+async function refreshEgo() {
+  const s = await api.egoStatus();
+  const both = s.skill.claude && s.skill.codex;
+  $('#ego-app').textContent = s.installed ? '✓ ego lite is installed' : '✗ ego lite isn\'t installed';
+  $('#ego-app').classList.toggle('danger', !s.installed);
+  $('#ego-skill').textContent = both ? '✓ Official skill installed for Claude Code and Codex'
+    : s.skill.claude || s.skill.codex ? `✓ Official skill installed for ${s.skill.claude ? 'Claude Code' : 'Codex'} only`
+      : '✗ Official skill not installed';
+  $('#ego-skill').classList.toggle('danger', !s.skill.claude && !s.skill.codex);
+  $('#ego-setup').classList.toggle('hidden', s.installed && both);
+  $('#cfg-ego-min').checked = s.keepMinimized;
+}
+$('#cfg-ego-min').addEventListener('change', (e) => api.setEgoKeepMinimized(e.target.checked));
+$('#ego-setup').addEventListener('click', () => { $('#settings').classList.add('hidden'); setUpEgo(); });
+$('#ego-check').addEventListener('click', () => refreshEgo());
+
+// ego's README sets ego lite up by pasting its setup prompt into an agent, which then follows
+// ego's install guide (on Windows: it walks the user through the installer and first-run setup,
+// and installs the official skill). Crew opens a new session in the home folder with that prompt,
+// on Claude Code, or Codex when only Codex is installed.
+async function setUpEgo(s) {
+  s = s || await api.egoStatus();
+  const agent = (await api.checkAgent('claude')).installed || !(await api.checkAgent('codex')).installed ? 'claude' : 'codex';
+  openSession(s.home, crypto.randomUUID(), false, { agent, prompt: s.setupPrompt });
+}
+
+// Once, at startup: if ego lite isn't installed, offer to set it up. Nothing runs without a click.
+async function offerEgoSetup() {
+  if (state.config.egoSetupOffered) return;
+  const s = await api.egoStatus();
+  if (s.installed) return;
+  state.config = await api.setConfig({ egoSetupOffered: true });
+  const box = $('#ssh-prompt'); // the shared dialog (hosts.js)
+  const close = () => box.classList.add('hidden');
+  box.firstElementChild.replaceChildren(
+    el('h2', {}, 'Set up ego lite?'),
+    el('p', { class: 'prompt-text' }, 'Agents use ego lite, a free browser built for agents, for anything that needs a browser. It isn\'t installed yet.'),
+    el('p', { class: 'prompt-text' }, 'Set up opens an agent session with ego\'s official setup prompt. The agent guides you through installing ego lite and its skill. You can also do this later in Settings.'),
+    el('div', { class: 'modal-actions' },
+      el('button', { onclick: close }, 'Not now'),
+      el('button', { class: 'primary', onclick: () => { close(); setUpEgo(s); } }, 'Set up')));
+  box.classList.remove('hidden');
+}
 
 // ---------- sidebar toggle ----------
 
@@ -2146,4 +2195,5 @@ api.onUsageChanged(() => loadUsage());
   loadUsage();
   setInterval(() => loadUsage(), 30_000); // also counts the reset times down
   addEventListener('focus', () => loadUsage());
+  offerEgoSetup();
 })();
