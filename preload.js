@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('api', {
 
   gitRoot: (cwd) => ipcRenderer.invoke('git:root', cwd),
   git: (cwd, args, input) => ipcRenderer.invoke('git:run', cwd, args, input),
+  listFiles: (root, rel) => ipcRenderer.invoke('files:list', root, rel),
+  readFile: (root, rel) => ipcRenderer.invoke('files:read', root, rel),
+  searchFiles: (root, query, mode) => ipcRenderer.invoke('files:search', root, query, mode),
   gitIgnore: (root, pattern) => ipcRenderer.invoke('git:ignore', root, pattern),
 
   listHosts: () => ipcRenderer.invoke('hosts:list'),

@@ -33,6 +33,7 @@ const agents = require('./agents');
 // ego lite, the agents' browser: its official skill and status (Settings).
 const browserForAgents = require('./browser');
 const providers = require('./providers');
+require('./files'); // the file browser beside the terminal
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');

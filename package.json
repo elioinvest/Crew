@@ -1,6 +1,6 @@
 {
   "name": "crew",
-  "version": "2.5.39",
+  "version": "2.5.42",
   "description": "Crew: work with your crew of coding agents (Claude Code and Codex) — projects and sessions, a terminal with a real input box, and a tabbed browser",
   "repository": {
     "type": "git",
@@ -21,6 +21,7 @@
     "electron-builder": "^26.18.0"
   },
   "dependencies": {
+    "@highlightjs/cdn-assets": "^11.11.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/headless": "^6.0.0",
@@ -33,7 +34,7 @@
     "appId": "com.claudeterminal.app",
     "productName": "Crew",
     "directories": {
-      "output": "release/v2.5.39"
+      "output": "release/v2.5.42"
     },
     "files": [
       "build/icon.ico",
@@ -49,6 +50,7 @@
       "crew.js",
       "browser.js",
       "providers.js",
+      "files.js",
       "codex-prompt.md",
       "renderer/**",
       "!node_modules/node-pty/prebuilds/darwin-*/**",

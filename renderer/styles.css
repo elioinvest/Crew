@@ -686,8 +686,6 @@ body:not(.browser-open) .git-titlebar { padding-right: calc(var(--overlay-w) + 8
 .git-row.selected { background: var(--git-blue); color: #fff; }
 .git-row.selected .c-date, .git-row.selected .c-author, .git-row.selected .c-hash, .git-row.selected .muted { color: rgba(255, 255, 255, .85) !important; }
 .git-row.selected .git-ref { background: #fff; }
-.git-row.selected .git-graph path, .git-row.selected .git-graph circle { stroke: #fff; }
-.git-row.selected .git-graph circle { fill: #fff; }
 [data-theme="dark"] .git-row.selected .git-ref { background: var(--main-bg); }
 .git-row.head .subject { font-weight: 600; }
 .git-row .c-graph { height: 24px; overflow: hidden; }
@@ -953,3 +951,171 @@ body.resizing-x { cursor: col-resize; }
 .ego-title { font-weight: 600; font-size: 13px; color: var(--text); }
 .ego-line { font-size: 12.5px; color: var(--running); }
 .ego-line.danger { color: #c4462d; }
+
+/* ---------- the file browser beside the terminal (files.js) ---------- */
+#files-resizer { width: 4px; margin-left: -2px; margin-right: -2px; cursor: col-resize; z-index: 5; }
+#files-resizer:hover, #files-resizer.dragging { background: var(--border); }
+#files { width: 50%; min-width: 380px; display: flex; flex-direction: column; background: var(--main-bg); border-left: 1px solid var(--border); }
+#files .git-titlebar .icon-btn { flex: none; }
+#files-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#files-sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: text; }
+.files-body { flex: 1; min-height: 0; display: flex; }
+#files-side { width: 280px; min-width: 180px; display: flex; flex-direction: column; min-height: 0; }
+#files-split { width: 5px; margin: 0 -2px; cursor: col-resize; z-index: 2; border-left: 1px solid var(--border); }
+#files-split:hover { background: var(--border); }
+.files-modes { display: flex; gap: 4px; padding: 8px 8px 0; }
+.files-mode { flex: 1; border: 0; background: none; border-radius: 7px; padding: 5px 0; font: inherit; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.files-mode.on { background: var(--active); color: var(--text); font-weight: 600; }
+.files-filter { display: flex; align-items: center; gap: 6px; margin: 8px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; }
+.files-filter svg { width: 15px; height: 15px; flex: none; stroke: var(--muted); fill: none; stroke-width: 2; }
+.files-filter input { flex: 1; min-width: 0; border: 0; outline: none; padding: 6px 0; font: inherit; font-size: 13px; background: none; color: var(--text); }
+#files-tree { flex: 1; overflow: auto; padding: 2px 4px 12px; font-size: 13px; }
+.files-row { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.files-row:hover { background: var(--hover); }
+.files-row.selected { background: var(--active); }
+.files-row.ignored .files-name { color: var(--muted); font-style: italic; }
+.files-row.empty { color: var(--muted); font-style: italic; cursor: default; }
+.files-chev { width: 12px; height: 12px; flex: none; display: inline-flex; transition: transform .12s; }
+.files-row.open .files-chev { transform: rotate(90deg); }
+.files-chev svg, .files-icon svg { width: 100%; height: 100%; stroke: var(--muted); fill: none; stroke-width: 2; }
+.files-icon { width: 15px; height: 15px; flex: none; display: inline-flex; }
+.files-name { overflow: hidden; text-overflow: ellipsis; }
+.files-row.hit { align-items: flex-start; }
+.files-row.hit .files-icon { margin-top: 2px; }
+.files-hit { display: flex; flex-direction: column; min-width: 0; }
+.files-where { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.files-line { font: 11.5px "Cascadia Mono", Consolas, monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.files-empty { padding: 16px; color: var(--muted); font-size: 13px; }
+#files-view { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.files-view-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.files-view-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "Cascadia Mono", Consolas, monospace; user-select: text; }
+.files-text { flex: 1; overflow: auto; display: flex; position: relative; font: 12.5px/18px "Cascadia Mono", Consolas, monospace; }
+.files-gutter { flex: none; padding: 8px 10px 8px 12px; text-align: right; color: var(--muted); white-space: pre; user-select: none; border-right: 1px solid var(--border); position: sticky; left: 0; background: var(--main-bg); z-index: 1; }
+.files-code { margin: 0; padding: 8px 12px; white-space: pre; tab-size: 4; user-select: text; font: inherit; }
+.files-mark { position: absolute; left: 0; right: 0; background: rgba(234, 179, 8, .18); pointer-events: none; }
+.files-image { flex: 1; overflow: auto; padding: 16px; display: flex; align-items: flex-start; justify-content: center; }
+.files-image img { max-width: 100%; background: repeating-conic-gradient(#0001 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+#btn-files.on { background: var(--active); }
+
+/* syntax colors in the file browser (highlight.js classes), light and dark */
+.files-code.hljs { background: none; color: var(--text); }
+.files-code .hljs-keyword, .files-code .hljs-built_in, .files-code .hljs-literal, .files-code .hljs-selector-tag, .files-code .hljs-doctag, .files-code .hljs-type { color: #0b47c9; }
+.files-code .hljs-string, .files-code .hljs-regexp, .files-code .hljs-template-string, .files-code .hljs-addition, .files-code .hljs-meta .hljs-string { color: #a31515; }
+.files-code .hljs-comment, .files-code .hljs-quote { color: #3a8a2f; }
+.files-code .hljs-number, .files-code .hljs-symbol, .files-code .hljs-bullet { color: #098658; }
+.files-code .hljs-title, .files-code .hljs-title.function_, .files-code .hljs-section { color: #795e26; }
+.files-code .hljs-title.class_, .files-code .hljs-class .hljs-title { color: #267f99; }
+.files-code .hljs-attr, .files-code .hljs-attribute, .files-code .hljs-property, .files-code .hljs-variable, .files-code .hljs-template-variable, .files-code .hljs-params { color: #001080; }
+.files-code .hljs-tag, .files-code .hljs-name, .files-code .hljs-selector-id, .files-code .hljs-selector-class { color: #800000; }
+.files-code .hljs-meta, .files-code .hljs-punctuation { color: #6a6a6a; }
+.files-code .hljs-deletion { color: #b31d28; }
+.files-code .hljs-strong { font-weight: 600; }
+.files-code .hljs-emphasis { font-style: italic; }
+.files-code .hljs-link { text-decoration: underline; }
+[data-theme="dark"] .files-code .hljs-keyword, [data-theme="dark"] .files-code .hljs-built_in, [data-theme="dark"] .files-code .hljs-literal, [data-theme="dark"] .files-code .hljs-selector-tag, [data-theme="dark"] .files-code .hljs-doctag, [data-theme="dark"] .files-code .hljs-type { color: #569cd6; }
+[data-theme="dark"] .files-code .hljs-string, [data-theme="dark"] .files-code .hljs-regexp, [data-theme="dark"] .files-code .hljs-template-string, [data-theme="dark"] .files-code .hljs-addition, [data-theme="dark"] .files-code .hljs-meta .hljs-string { color: #ce9178; }
+[data-theme="dark"] .files-code .hljs-comment, [data-theme="dark"] .files-code .hljs-quote { color: #6a9955; }
+[data-theme="dark"] .files-code .hljs-number, [data-theme="dark"] .files-code .hljs-symbol, [data-theme="dark"] .files-code .hljs-bullet { color: #b5cea8; }
+[data-theme="dark"] .files-code .hljs-title, [data-theme="dark"] .files-code .hljs-title.function_, [data-theme="dark"] .files-code .hljs-section { color: #dcdcaa; }
+[data-theme="dark"] .files-code .hljs-title.class_, [data-theme="dark"] .files-code .hljs-class .hljs-title { color: #4ec9b0; }
+[data-theme="dark"] .files-code .hljs-attr, [data-theme="dark"] .files-code .hljs-attribute, [data-theme="dark"] .files-code .hljs-property, [data-theme="dark"] .files-code .hljs-variable, [data-theme="dark"] .files-code .hljs-template-variable, [data-theme="dark"] .files-code .hljs-params { color: #9cdcfe; }
+[data-theme="dark"] .files-code .hljs-tag, [data-theme="dark"] .files-code .hljs-name, [data-theme="dark"] .files-code .hljs-selector-id, [data-theme="dark"] .files-code .hljs-selector-class { color: #569cd6; }
+[data-theme="dark"] .files-code .hljs-meta, [data-theme="dark"] .files-code .hljs-punctuation { color: #9a9a9a; }
+[data-theme="dark"] .files-code .hljs-deletion { color: #f48771; }
+
+/* ---------- Git: a calmer look (branch header, commit box on top, folding sections) ----------
+   Overrides the SourceTree-style rules above; the panel's functions are unchanged. */
+:root { --git-add: #2f8a3a; --git-delc: #c0392b; --git-mod: #b7791f; }
+[data-theme="dark"] { --git-add: #7bc77f; --git-delc: #f08b7e; --git-mod: #e0b25a; }
+body.git-open #btn-git { color: var(--text); background: var(--active); }
+
+.git-titlebar { height: auto; min-height: 56px; align-items: flex-start; padding-top: 10px; padding-bottom: 8px; }
+.git-titlebar .icon-btn { margin-top: 2px; }
+.git-title { gap: 4px; }
+.git-branch-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#git-title { flex: 1; min-width: 0; font: 700 13.5px "Cascadia Mono", Consolas, monospace; }
+#git-stats { flex: none; display: flex; gap: 6px; font: 600 12.5px "Cascadia Mono", Consolas, monospace; }
+#git-sub { font: 12.5px "Cascadia Mono", Consolas, monospace; color: var(--muted); }
+.git-add { color: var(--git-add); }
+.git-del { color: var(--git-delc); }
+
+.git-toolbar { padding: 4px 10px; gap: 1px; }
+.git-tool { min-width: 32px; padding: 6px; border-radius: 7px; flex-direction: row; }
+.git-tool span { display: none; }
+.git-tool svg { width: 17px; height: 17px; color: var(--muted); }
+.git-tool:hover { background: var(--hover); }
+.git-tool:hover svg { color: var(--text); }
+.git-tool:active { background: var(--active); color: var(--text); }
+.git-tool:active svg { color: var(--text); }
+.git-tool .badge { top: 0; right: -2px; background: var(--text); color: var(--main-bg); }
+.git-tool-sep { margin: 6px 4px; }
+
+#git-nav { background: var(--main-bg); }
+.git-nav-item:hover { background: var(--hover); }
+.git-nav-item.active { background: var(--active); color: var(--text); }
+.git-nav-item.active .extra { color: var(--muted); }
+.git-nav-item.current::before { background: var(--git-add); }
+
+.git-row:hover { background: var(--hover); }
+.git-row.selected { background: var(--active); color: var(--text); }
+.git-row.selected .c-date, .git-row.selected .c-author, .git-row.selected .c-hash, .git-row.selected .muted { color: var(--muted) !important; }
+.git-row.selected .git-ref { background: inherit; }
+.git-spinner { border-color: var(--active); border-top-color: var(--text); }
+#git button.primary, #git-dialog button.primary { background: var(--text); color: var(--main-bg); }
+#git button.primary:hover, #git-dialog button.primary:hover { background: var(--text); opacity: .85; }
+#git-dialog input:focus, #git-dialog select:focus, #git-dialog textarea:focus { border-color: var(--muted); }
+.git-hash-link, .git-more { color: var(--text); text-decoration: underline; text-decoration-color: var(--border); }
+
+/* The files column: the commit box on top, then the sections, scrolling together. */
+#git-files-col { width: 40%; min-width: 220px; flex: none; display: flex; flex-direction: column; min-height: 0; }
+#git-files { width: auto !important; min-width: 0; flex: 1; display: block; overflow-y: auto; padding-bottom: 12px; }
+#git-files .git-section { flex: none; min-height: 0; }
+#git-commit-box { border-top: 0; background: var(--main-bg); padding: 12px 12px 6px; gap: 10px; }
+#git-msg { min-height: 72px; border-radius: 12px; padding: 10px 12px; resize: vertical; }
+#git-msg:focus { border-color: var(--muted); box-shadow: none; }
+.git-commit-bar { display: flex; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.git-commit-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 34px; border: 0; background: none; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.git-commit-btn svg, .git-commit-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.git-commit-btn:hover, .git-commit-more:hover { background: var(--hover); }
+.git-commit-more { width: 38px; flex: none; display: flex; align-items: center; justify-content: center; border: 0; border-left: 1px solid var(--border); background: none; color: var(--muted); cursor: pointer; }
+#git-commit-opts { display: flex; flex-direction: column; gap: 6px; padding: 2px 4px 4px; font-size: 12.5px; }
+#git-commit-opts label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+#git-commit-opts input { margin: 0; accent-color: var(--text); }
+#git-commit-opts .git-small { align-self: flex-start; }
+
+.git-section { border-bottom: 0; margin-top: 4px; }
+.git-section-head { background: none; border-bottom: 0; padding: 8px 10px 4px 8px; font-size: 13px; cursor: pointer; user-select: none; }
+.git-section-chev { width: 14px; height: 14px; display: inline-flex; color: var(--muted); transition: transform .12s; }
+.git-section-chev svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; }
+.git-section-head.folded .git-section-chev { transform: rotate(-90deg); }
+.git-section-count { color: var(--muted); font-weight: 500; }
+.git-small { border: 0; background: none; color: var(--muted); padding: 2px 6px; }
+.git-small:hover:not(:disabled) { background: var(--hover); color: var(--text); border: 0; }
+.git-file-list { overflow: visible; padding: 0 4px; }
+.git-file { height: 28px; gap: 8px; padding: 0 8px 0 22px; border-radius: 6px; }
+.git-file:hover { background: var(--hover); }
+.git-file.picked { background: var(--active); color: var(--text); }
+.git-file.picked .git-fdir { color: var(--muted); }
+.git-file.picked .git-st { box-shadow: none; }
+.git-ficon { width: 15px; height: 15px; flex: none; display: inline-flex; color: var(--muted); }
+.git-ficon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.git-fname { max-width: 55%; }
+.git-fcount { flex: none; display: flex; gap: 4px; font: 12px "Cascadia Mono", Consolas, monospace; }
+.git-st { width: auto; min-width: 12px; height: auto; background: none !important; color: var(--muted); font: 700 12px "Cascadia Mono", Consolas, monospace; line-height: 1; }
+.st-M, .st-T { color: var(--git-mod); }
+.st-A, .st-q { color: var(--git-add); }
+.st-D, .st-U { color: var(--git-delc); }
+.st-R, .st-C { color: #4a8fd8; }
+.git-file-act { width: 22px; height: 22px; border: 0; background: none; font-size: 15px; }
+.git-file-act:hover { background: var(--active); }
+
+@container (max-width: 820px) {
+  #git-files-col { width: auto !important; height: 55%; min-width: 0; min-height: 180px; }
+  #git-files { height: auto; min-height: 0; }
+}
+.git-section-title { white-space: nowrap; }
+.git-section-head .spacer { min-width: 6px; }
+.git-icon-act { width: 26px; height: 24px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.git-icon-act svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
+.git-icon-act:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.git-icon-act:disabled { opacity: .35; cursor: default; }

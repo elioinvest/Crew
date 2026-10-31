@@ -70,6 +70,11 @@ const ZH = {
   'A custom model provider, run on Codex': '自定义模型提供商，由 Codex 运行', 'A custom model provider, run on Claude Code': '自定义模型提供商，由 Claude Code 运行', 'It edits files inside the project folder and runs commands, without asking.': '它会在项目文件夹内编辑文件并运行命令，不经询问。',
   'Add models to this provider in Settings → Model providers.': '请在“设置 → 模型提供商”中为该提供商添加模型。',
   'Stopped.': '已停止。',
+  'Staged changes': '已暂存的更改', 'Changes': '更改', 'Message': '信息', 'Commit options': '提交选项', 'Commit (Ctrl+Enter)': '提交 (Ctrl+Enter)', 'Clear and go to History': '清空并转到历史',
+  // ---------- file browser (files.js) ----------
+  'Files of this folder': '此文件夹的文件', 'Close files': '关闭文件', 'Name': '名称', 'Content': '内容', 'Find files': '查找文件', 'Find in files': '在文件中查找',
+  'Click a file to see its content.': '点击文件查看其内容。', 'No matches': '没有匹配项', 'Empty': '空', 'Loading…': '加载中…', 'Open in its default app': '用默认程序打开',
+  'This is a binary file.': '这是二进制文件。', 'The image is too large to show.': '图片太大，无法显示。',
   'Ask for approval': '请求批准', 'Approve for me': '替我批准', 'Read Only': '只读',
   'Read and edit workspace files and run commands; asks for internet access or edits outside the workspace': '读取和编辑工作区文件、运行命令；联网或修改工作区以外的文件时会询问',
   'Only asks for actions detected as potentially unsafe': '只在检测到可能不安全的操作时询问',

@@ -659,6 +659,7 @@ function activate(sessionId, { focusInput = true } = {}) {
   renderComposer();
   renderSidebar();
   updateGitButton();
+  updateFilesButton(); // files.js
 }
 
 function closeSession(sessionId) {

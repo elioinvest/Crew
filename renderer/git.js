@@ -16,6 +16,8 @@ const git = {
   gitDir: null,
   view: localStorage.getItem('gitView') === 'status' ? 'status' : 'history',
   head: null, // HEAD commit hash, or null before the first commit
+  numstat: { staged: new Map(), unstaged: new Map() }, // path -> [lines added, removed]
+  foldedSections: {}, // section title -> folded
   branch: '', // current branch; empty when HEAD is detached
   locals: [], // { name, hash, upstream, ahead, behind, gone }
   remoteBranches: [], // { name, remote, hash }
@@ -314,6 +316,21 @@ function buildGraph(commits) {
 }
 
 // Reloads what changed since last time: the file status, or the refs and history.
+// Lines added / removed per file (git diff --numstat), for the file rows and the header. Binary
+// files and untracked ones have none.
+async function loadNumstat() {
+  const parse = (out) => {
+    const m = new Map();
+    for (const line of out.split('\0').filter(Boolean)) {
+      const [a, d, p] = line.split('\t');
+      if (p && a !== '-') m.set(p, [+a || 0, +d || 0]);
+    }
+    return m;
+  };
+  const [st, un] = await Promise.all([run(['diff', '--cached', '--numstat', '-z', '--no-renames']), run(['diff', '--numstat', '-z', '--no-renames'])]);
+  git.numstat = { staged: parse(st.stdout || ''), unstaged: parse(un.stdout || '') };
+}
+
 async function gitReload(force = false) {
   if (!git.open || !git.root) return;
   if (git.reloading) { if (force) git.forceAgain = true; return; } // run again once this one is done
@@ -332,7 +349,7 @@ async function gitReload(force = false) {
     git.refSig = refSig;
     git.statusSig = st.stdout;
     git.head = head.code === 0 ? head.stdout.trim() : null;
-    if (statusChanged) parseStatus(st.stdout);
+    if (statusChanged) { parseStatus(st.stdout); await loadNumstat(); }
     if (refsChanged) {
       await loadRefs();
       await loadLog();
@@ -359,6 +376,7 @@ async function openGit(folder) {
     root = await repoRoot(folder);
     if (!root) return;
   }
+  if (typeof files !== 'undefined' && files.open) closeFiles(); // they share the right side (files.js)
   const switching = norm(root) !== norm(git.root);
   git.root = root;
   if (switching) {
@@ -403,8 +421,17 @@ function fitTerminals() {
 
 function gitHeader() {
   if (!git.open) return;
-  $('#git-title').textContent = git.root.split(/[\\/]/).filter(Boolean).pop();
-  $('#git-sub').textContent = `${git.branch || (git.head ? `detached at ${short(git.head)}` : 'no commits yet')} · ${git.root}`;
+  const repo = git.root.split(/[\\/]/).filter(Boolean).pop();
+  $('#git-title').textContent = git.branch || (git.head ? `detached at ${short(git.head)}` : 'no commits yet');
+  $('#git-title').title = `${repo} · ${git.root}`;
+  // The lines added and removed by the uncommitted changes, staged and not.
+  let add = 0;
+  let del = 0;
+  for (const m of [git.numstat.staged, git.numstat.unstaged]) for (const [a, d] of m.values()) { add += a; del += d; }
+  $('#git-stats').replaceChildren(...(add || del ? [el('span', { class: 'git-add' }, `+${add}`), el('span', { class: 'git-del' }, `-${del}`)] : []));
+  const current = git.locals.find((b) => b.name === git.branch);
+  const track = [current?.ahead && `↑${current.ahead}`, current?.behind && `↓${current.behind}`].filter(Boolean).join(' ');
+  $('#git-sub').textContent = current?.upstream ? `→ ${current.upstream}${track ? `  ${track}` : ''}` : repo;
   $('#git-sub').title = git.root;
 }
 
@@ -656,6 +683,7 @@ function renderDetail() {
   else renderCommit(git.selected);
 }
 
+const GIT_FILE_ICON = '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
 const STATUS_NAMES = { M: 'Modified', A: 'Added', D: 'Deleted', R: 'Renamed', C: 'Copied', T: 'Type changed', U: 'Conflicted', '?': 'Untracked' };
 
 function fileRow(f, kind, list) {
@@ -668,9 +696,12 @@ function fileRow(f, kind, list) {
     onclick: (e) => pickFile(e, f, kind, list),
     oncontextmenu: (e) => { e.preventDefault(); if (!git.picked.has(key)) pickFile({}, f, kind, list); fileMenu(e, f, kind); },
   },
-  el('span', { class: `git-st st-${f.status === '?' ? 'q' : f.status}` }, f.status === '?' ? '?' : f.status),
+  el('span', { class: 'git-ficon', html: GIT_FILE_ICON }),
   el('span', { class: 'git-fname' }, base),
   el('span', { class: 'git-fdir' }, f.orig ? `${f.orig} →` : dir));
+  const counts = kind === 'commit' ? null : git.numstat[kind]?.get(f.path);
+  row.append(el('span', { class: 'git-fcount' }, ...(counts ? [counts[0] ? el('span', { class: 'git-add' }, `+${counts[0]}`) : null, counts[1] ? el('span', { class: 'git-del' }, `-${counts[1]}`) : null] : [])),
+    el('span', { class: `git-st st-${f.status === '?' ? 'q' : f.status}` }, f.status === '?' ? 'U' : f.status));
   if (kind !== 'commit') {
     row.addEventListener('dblclick', () => (kind === 'staged' ? unstage([f]) : stage([f])));
     row.append(el('button', {
@@ -703,10 +734,33 @@ function pickFile(e, f, kind, list) {
 const pickedOf = (kind, list) => list.filter((f) => git.picked.has(`${kind}:${f.path}`));
 
 function section(title, count, buttons, rows, emptyText) {
-  return el('div', { class: 'git-section' },
-    el('div', { class: 'git-section-head' }, el('span', {}, `${title} (${count})`), el('span', { class: 'spacer' }), ...buttons),
-    el('div', { class: 'git-file-list' }, ...(rows.length ? rows : [el('div', { class: 'git-empty' }, emptyText)])));
+  const folded = !!git.foldedSections[title];
+  const head = el('div', { class: `git-section-head${folded ? ' folded' : ''}` },
+    el('span', { class: 'git-section-chev', html: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>' }),
+    el('span', { class: 'git-section-title' }, title),
+    el('span', { class: 'git-section-count' }, String(count)),
+    el('span', { class: 'spacer' }), ...buttons);
+  head.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    git.foldedSections[title] = !folded;
+    renderDetail();
+  });
+  return el('div', { class: 'git-section' }, head,
+    folded ? null : el('div', { class: 'git-file-list' }, ...(rows.length ? rows : [el('div', { class: 'git-empty' }, emptyText)])));
 }
+
+// A section's action as a small icon, its name in the tooltip.
+const GIT_ACT_ICONS = {
+  minus: '<svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg>',
+  minusAll: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12h8"/></svg>',
+  plusAll: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>',
+};
+const iconBtn = (icon, title, onclick, disabled) => {
+  const b = el('button', { class: 'git-icon-act', title, html: GIT_ACT_ICONS[icon], onclick });
+  b.disabled = !!disabled;
+  return b;
+};
 
 const smallBtn = (label, onclick, disabled) => {
   const b = el('button', { class: 'git-small', onclick }, label);
@@ -736,13 +790,13 @@ function renderWorkingCopy() {
   }
   const stagedPicked = pickedOf('staged', git.staged);
   const unstagedPicked = pickedOf('unstaged', git.unstaged);
-  parts.push(section('Staged files', git.staged.length, [
-    smallBtn('Unstage all', () => unstage(git.staged, true), !git.staged.length),
-    smallBtn('Unstage selected', () => unstage(stagedPicked), !stagedPicked.length),
+  parts.push(section('Staged changes', git.staged.length, [
+    iconBtn('minus', 'Unstage selected', () => unstage(stagedPicked), !stagedPicked.length),
+    iconBtn('minusAll', 'Unstage all', () => unstage(git.staged, true), !git.staged.length),
   ], git.staged.map((f) => fileRow(f, 'staged', git.staged)), 'Nothing staged'));
-  parts.push(section('Unstaged files', git.unstaged.length, [
-    smallBtn('Stage all', () => stage(git.unstaged, true), !git.unstaged.length),
-    smallBtn('Stage selected', () => stage(unstagedPicked), !unstagedPicked.length),
+  parts.push(section('Changes', git.unstaged.length, [
+    iconBtn('plus', 'Stage selected', () => stage(unstagedPicked), !unstagedPicked.length),
+    iconBtn('plusAll', 'Stage all', () => stage(git.unstaged, true), !git.unstaged.length),
   ], git.unstaged.map((f) => fileRow(f, 'unstaged', git.unstaged)), 'No changes'));
   box.replaceChildren(...parts);
   box.querySelectorAll('.git-file-list').forEach((l, i) => { l.scrollTop = scroll[i] || 0; });
@@ -996,6 +1050,7 @@ async function ignorePath(pattern) {
 // ---------- commit ----------
 
 $('#git-commit-go').addEventListener('click', () => doCommit());
+$('#git-commit-more').addEventListener('click', () => $('#git-commit-opts').classList.toggle('hidden'));
 $('#git-commit-cancel').addEventListener('click', () => { $('#git-msg').value = ''; $('#git-amend').checked = false; setView('history'); });
 $('#git-msg').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); doCommit(); } });
 $('#git-amend').addEventListener('change', async (e) => {
@@ -1354,4 +1409,4 @@ dragSplit($('#git-split'), $('#git-log'), 'y', 'gitLogHeight', 80, () => $('#git
     addEventListener('mouseup', up);
   });
 })();
-dragSplit($('#git-files-split'), $('#git-files'), 'x', 'gitFilesWidth', 200, () => $('#git-detail').offsetWidth - 200);
+dragSplit($('#git-files-split'), $('#git-files-col'), 'x', 'gitFilesWidth', 220, () => $('#git-detail').offsetWidth - 200);
