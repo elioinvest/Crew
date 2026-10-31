@@ -25,7 +25,7 @@ Crew runs the agents you already have. Install the ones you want to use:
 
 You don't have to do this in advance. If you start a session for an agent that isn't installed, Crew shows the command and an **Install** button that runs it for you, then starts the session. Each agent asks you to sign in the first time it runs: Claude Code with a Claude account or API key, Codex with a ChatGPT account or OpenAI API key.
 
-## Use
+## Use 
 
 ### Projects and sessions
 
@@ -62,7 +62,7 @@ You don't have to do this in advance. If you start a session for an agent that i
 ### Files
 
 - The files button at the top right, beside Git, opens the active session's folder as a tree in a panel on the right. Folders open one at a time; files Git ignores are shown dimmed. The panel follows the active session, and shares the right side with Git.
-- **Name** finds files by name, **Content** finds lines inside files. Click a file to see its whole content beside the tree (images as images), with line numbers and syntax highlighting for its type (by [highlight.js](https://highlightjs.org/)); a content match opens at its line.
+- **Name** finds files by name, **Content** finds lines inside files. Click a file to see its whole content beside the tree (images as images), with line numbers and syntax highlighting for its type (by [highlight.js](https://highlightjs.org/)); a content match opens at its line. Edit the file right there: **Ctrl+S** or **Save** saves it (keeping its line endings), Tab / Shift+Tab indent, and switching away asks first about unsaved changes.
 
 ### Git
 

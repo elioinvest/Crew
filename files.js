@@ -18,7 +18,7 @@ function ignoredOf(root, rels) {
   if (!rels.length) return new Set();
   const r = git(root, ['check-ignore', '--stdin'], rels.join('\n'));
   return new Set((r.status === 0 ? r.stdout : '').split(/\r?\n/).filter(Boolean).map((p) => p.replace(/\\/g, '/')));
-}
+} 
 
 // One folder's entries: folders first, then files, by name.
 ipcMain.handle('files:list', (_e, root, rel = '') => {
@@ -48,6 +48,13 @@ ipcMain.handle('files:read', (_e, root, rel) => {
   const buf = fs.readFileSync(f);
   if (buf.subarray(0, 8000).includes(0)) return { error: 'This is a binary file.', size: st.size };
   return { text: buf.toString('utf8'), size: st.size };
+});
+
+// Saves an edited file (the window keeps its line endings).
+ipcMain.handle('files:write', (_e, root, rel, text) => {
+  const f = path.join(root, rel);
+  if (path.relative(root, f).startsWith('..')) return { error: 'The file is outside the folder.' };
+  try { fs.writeFileSync(f, String(text)); return { ok: true }; } catch (e) { return { error: e.message }; }
 });
 
 // Files whose path contains the query (by name), or lines containing it (by content).

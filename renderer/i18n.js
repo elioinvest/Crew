@@ -70,6 +70,7 @@ const ZH = {
   'A custom model provider, run on Codex': '自定义模型提供商，由 Codex 运行', 'A custom model provider, run on Claude Code': '自定义模型提供商，由 Claude Code 运行', 'It edits files inside the project folder and runs commands, without asking.': '它会在项目文件夹内编辑文件并运行命令，不经询问。',
   'Add models to this provider in Settings → Model providers.': '请在“设置 → 模型提供商”中为该提供商添加模型。',
   'Stopped.': '已停止。',
+  'Save (Ctrl+S)': '保存 (Ctrl+S)', 'Unsaved changes': '未保存的更改', "Your changes are lost if you don't save them.": '如果不保存，你的更改将会丢失。', "Don't save": '不保存',
   'Staged changes': '已暂存的更改', 'Changes': '更改', 'Message': '信息', 'Commit options': '提交选项', 'Commit (Ctrl+Enter)': '提交 (Ctrl+Enter)', 'Clear and go to History': '清空并转到历史',
   // ---------- file browser (files.js) ----------
   'Files of this folder': '此文件夹的文件', 'Close files': '关闭文件', 'Name': '名称', 'Content': '内容', 'Find files': '查找文件', 'Find in files': '在文件中查找',
@@ -200,6 +201,9 @@ const ZH_PATTERNS = [
   [/^(\d+) images? attached$/, (m) => `已附加 ${m[1]} 张图片`],
   [/^Couldn't fetch the models: (.*)$/, (m) => `无法获取模型：${m[1]}`],
   [/^Added (.+)\.$/, (m) => `已添加 ${m[1]}。`],
+  [/^Save changes to (.+)\?$/, (m) => `保存对 ${m[1]} 的更改？`],
+  [/^Saved (.+)$/, (m) => `已保存 ${m[1]}`],
+  [/^Couldn't save (.+?): (.*)$/, (m) => `无法保存 ${m[1]}：${m[2]}`],
   [/^Codex doesn't offer "(.+)" here$/, (m) => `Codex 在这里不提供“${m[1]}”`],
   [/^Ask (.+) to do anything$/, (m) => `让 ${m[1]} 做任何事`],
   [/^Model (\d+): the model ID can't be empty\.$/, (m) => `模型 ${m[1]}：模型 ID 不能为空。`],

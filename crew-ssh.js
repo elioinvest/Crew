@@ -7,7 +7,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 
-const HELP = `crew-ssh: run commands on the SSH hosts saved in Crew.
+const HELP = `crew-ssh: run commands on the SSH hosts saved in Crew.  
 
 Usage:
   crew-ssh hosts [--json]                         list the saved hosts (no credentials)

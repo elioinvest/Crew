@@ -1119,3 +1119,14 @@ body.git-open #btn-git { color: var(--text); background: var(--active); }
 .git-icon-act svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
 .git-icon-act:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .git-icon-act:disabled { opacity: .35; cursor: default; }
+
+/* The file editor: a transparent textarea over the highlighted code (files.js), the same metrics. */
+.files-layer { position: relative; flex: none; min-width: calc(100% - 60px); }
+.files-layer .files-code, .files-input { margin: 0; padding: 8px 12px; font: inherit; white-space: pre; tab-size: 4; letter-spacing: normal; word-spacing: normal; }
+.files-input { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--text); z-index: 1; }
+.files-input::selection { background: rgba(66, 133, 244, .28); color: transparent; }
+.files-dirty { color: var(--git-mod, #b7791f); font-size: 11px; }
+.files-save { border: 1px solid var(--border); background: var(--text); color: var(--main-bg); border-radius: 6px; padding: 2px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.files-save:hover { opacity: .85; }
+/* Bold or italic tokens would be wider than the textarea's text and push the caret out of line. */
+.files-layer .files-code * { font-weight: inherit !important; font-style: normal !important; }

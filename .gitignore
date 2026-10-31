@@ -11,7 +11,7 @@ out/
 *.blockmap
 builder-debug.yml
 builder-effective-config.yaml
-latest*.yml
+latest*.yml 
 
 # Installers and archives (GitHub rejects files over 100 MB; attach them to a release instead)
 *.exe
