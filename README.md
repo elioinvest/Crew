@@ -73,12 +73,13 @@ You don't have to do this in advance. If you start a session for an agent that i
 Agents can manage your servers over SSH, without ever seeing your passwords or keys. The idea comes from [Hatoba](https://github.com/scarletkc/Hatoba).
 
 - Add servers under **Hosts** at the bottom of the sidebar, or choose **⋯ → Import from ~/.ssh/config**. Each host has a name, address, user, sign-in method (key file, ssh-agent or password), an optional group, and **notes for agents**, e.g. "Production: never restart the database."
-- **Click a host** to open its workspace: your terminal on the server on one side, and an agent session (Claude, or Codex from the **+** on the host) on the other. Chat with the agent, e.g. "why is nginx failing?" or "free up some disk space", and it works on that server while you watch and use the terminal yourself. The agent can also read your terminal ("look at this error").
+- **Click a host** to open its workspace: your terminal on the server on one side, and an agent session (Claude, or Codex or one of your custom model providers from the **+** on the host) on the other. Chat with the agent, e.g. "why is nginx failing?" or "free up some disk space", and it works on that server. The agent shares the terminal with you, as in Hatoba: it reads what's on screen ("look at this error") and types into it (commands, answers to prompts, keys like Ctrl+C, programs like `top` or an editor), and you watch everything it types and can step in at any time. When the terminal asks for a password or a code, you type it, and the agent carries on.
 - A host unfolds in the sidebar like a project: **Terminal**, then its agent sessions, newest first. Click one to resume it beside the terminal.
-- The agent knows which server it's on from the workspace's instructions, including your notes for that host. It uses `crew-ssh` (`exec`, `screen`, `cp`). Agents in other sessions can use it too, by host name.
+- The agent knows which server it's on from the workspace's instructions, including your notes for that host. It uses `crew-ssh`: `send` and `screen` for the shared terminal, `exec` for commands run on their own, and `cp` for files. Agents in other sessions can use it too, by host name.
+- Codex runs commands in a sandbox that can't reach Crew, so Crew adds a Codex rule (`~/.codex/rules/crew.rules`) that lets just `crew-ssh` and `crew` run outside it. Crew still asks you before anything that changes a host.
 - Choose **⋯ → Teach Claude Code and Codex to use crew-ssh** once. It installs a skill so the agents know the command without being told.
 - Crew keeps the credentials and signs in itself. Passwords are saved encrypted with Windows data protection, and the window and the agents never receive them.
-- Commands that only read (`df`, `ps`, `systemctl status`, `journalctl`, `docker ps`…) run at once. Anything that could change something, and every upload, shows a card where you **Allow**, **Allow 15 min** (everything on that host) or **Deny**. Each host can instead ask before every command or run everything.
+- Commands that only read (`df`, `ps`, `systemctl status`, `journalctl`, `docker ps`…) run at once, whether run on their own or typed at the terminal's prompt. Anything that could change something, input into a full-screen program, and every upload, shows a card where you **Allow**, **Allow 15 min** (everything on that host) or **Deny**. Each host can instead ask before every command or run everything.
 - The first connection to a host shows its key fingerprint to trust. If the key later changes, Crew blocks the connection.
 - Each host's editor lists its recent agent commands and what happened to them.
 
@@ -86,11 +87,20 @@ Agents can manage your servers over SSH, without ever seeing your passwords or k
 
 Hand parts of a job to other agents from your main session, one after another or several at once.
 
-- Add agents under **Agents** in the sidebar. **+** offers a code reviewer, a tester, a publisher or a blank agent. Each has a name, runs on Claude or Codex (Crew checks which are installed) with a model and reasoning effort picked from what that CLI offers, has instructions, and has a **Can** setting: only read, edit and run commands in the project, or anything without asking. Give the last only to agents you trust with it.
+- Add agents under **Agents** in the sidebar. **+** offers a code reviewer, a tester, a publisher or a blank agent. Each has a name, runs on Claude, Codex (Crew checks which are installed) or one of your custom model providers, with a model and reasoning effort picked from what it offers, has instructions, and has a **Can** setting: only read, edit and run commands in the project, or anything without asking. Give the last only to agents you trust with it.
 - In a session, type `@` to pick agents, and say what should happen: "Build the signup flow. Then have @CodeReviewerAgent review it and @TesterAgent test it at the same time. If both pass, have @CodePublisherAgent publish it."
 - The main agent hands each one a task with `crew ask` (`--bg` for several at once, then `crew wait`) and gets their answers back. Agents work in the same folder, in Claude's or Codex's non-interactive mode.
 - A card at the top right shows each running agent, what it's doing and for how long, with **Stop**, **Result** and **Open** (continue a Claude agent's run as a normal session).
 - Each agent uses its own CLI's quota, shown in the usage bar.
+
+### Custom model providers
+
+Add your own APIs as agents beside Claude and Codex: relays, self-hosted services and other OpenAI- or Anthropic-compatible endpoints.
+
+- In **Settings → Model providers**, choose **+ Add provider** and fill in a provider ID, a display name, an icon (an image or an emoji; otherwise the name's first letter), the API URL, the API protocol, the API key and its models. **Fetch available models** reads the provider's list; you can also add models by hand, with a display name, and star the default.
+- Each provider runs on the official CLI that speaks its protocol, with an environment of its own: a home folder Crew keeps for it, holding its settings, sessions and history apart from your own Claude and Codex. **OpenAI Responses** providers run on Codex with that folder as `CODEX_HOME`, whose `config.toml` makes the provider the default (your Windows sandbox setting is carried over); **Anthropic Messages** providers run on Claude Code with it as `CLAUDE_CONFIG_DIR`, through the official `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_MODEL` settings. Those are the protocols the two CLIs support (Codex no longer supports Chat Completions). Crew's `crew-ssh` and ego lite skills are linked into each home.
+- Each provider appears with its icon in the **New session** menus, on hosts and as an option for @-agents, and has its own group in the sidebar. The header, the prompt box and the chips show the provider, its models and its reasoning effort. Picking another model or effort switches it in the running session, without a restart (Claude Code: `/model`, `/effort`; Codex: `/model … --reasoning=…`, with the provider's models given to Codex as a model catalog), and a session keeps what you picked. The catalog carries Codex's own base prompt, `codex-prompt.md` from [openai/codex](https://github.com/openai/codex) (Apache-2.0).
+- The API key is saved encrypted with Windows data protection, and only the sessions you start on that provider receive it. Your own Claude and Codex settings files aren't changed.
 
 ### Window
 

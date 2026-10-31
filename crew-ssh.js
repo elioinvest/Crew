@@ -1,5 +1,5 @@
 // crew-ssh: lets the agents in Crew's sessions use the SSH hosts saved in Crew, by name, without
-// ever seeing their credentials. It forwards each request to the running Crew over a private
+// ever seeing their credentials, and share the user's terminal on a host (screen, send). It forwards each request to the running Crew over a private
 // pipe; Crew connects, asks the user where needed, and streams the output back.
 // Run by Crew's own executable in Node mode (see installCli in ssh.js).
 
@@ -11,14 +11,27 @@ const HELP = `crew-ssh: run commands on the SSH hosts saved in Crew.
 
 Usage:
   crew-ssh hosts [--json]                         list the saved hosts (no credentials)
-  crew-ssh exec <host> [--cwd DIR] -- <command>   run a command with the host's login shell
+  crew-ssh exec <host> [--cwd DIR] "<command>"    run a command with the host's login shell
   crew-ssh cp <local> <host>:<remote>             upload one file
   crew-ssh cp <host>:<remote> <local>             download one file
-  crew-ssh screen <host> [--lines N]              what's on the user's terminal on the host in Crew
+  crew-ssh screen <host> [--lines N] [--wait S]   what's on the user's terminal on the host in Crew;
+                                                  --wait first waits up to S seconds (max 120) for
+                                                  new output to come and go quiet
+  crew-ssh send <host> [--keys K1,K2] [--key K] [--wait S] ["<text>"]
+                                                  type into that terminal, then press the keys, wait
+                                                  until the output is quiet for 1s (or S seconds,
+                                                  default 10) and print what appeared
+
+Keys: one printable character, or enter, tab, shift+tab, esc, backspace, space, up, down, left,
+right, home, end, page_up, page_down, insert, delete, f1-f12, ctrl+a-ctrl+z, alt+<char>. Use
+--key for a literal comma. Example: crew-ssh send web1 --keys enter "sudo apt upgrade"
 
 <host> is a saved host's name (or id). Crew holds the credentials, so never pass passwords
 or keys. Commands that only read run at once; others wait until the user approves them in
-Crew, so allow a long timeout. There's no terminal and no input: use non-interactive flags.
+Crew, so allow a long timeout. exec has no terminal and no input: use non-interactive flags,
+or send for interactive programs.
+
+
 
 Exit status: the remote command's, or 255 when Crew couldn't run it (the reason is printed
 on stderr, starting with "crew-ssh:").`;
@@ -89,7 +102,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
   });
 } else if (cmd === 'exec' || cmd === 'run') {
   const host = args.shift();
-  if (!host) die('which host? Usage: crew-ssh exec <host> -- <command>');
+  if (!host) die('which host? Usage: crew-ssh exec <host> "<command>"');
   let cwd = '';
   while (args.length && args[0] !== '--' && args[0].startsWith('--')) {
     const opt = args.shift();
@@ -99,13 +112,29 @@ if (!cmd || cmd === 'help' || cmd === '--help' || cmd === '-h') {
   }
   if (args[0] === '--') args.shift();
   const command = args.length === 1 ? args[0] : args.join(' ');
-  if (!command.trim()) die('no command given. Usage: crew-ssh exec <host> -- <command>');
+  if (!command.trim()) die('no command given. Usage: crew-ssh exec <host> "<command>"');
   request({ op: 'exec', host, command, cwd });
 } else if (cmd === 'screen') {
   const host = args.shift();
-  if (!host) die('which host? Usage: crew-ssh screen <host> [--lines N]');
-  const i = args.indexOf('--lines');
-  request({ op: 'screen', host, lines: i >= 0 ? +args[i + 1] || 60 : 60 });
+  if (!host) die('which host? Usage: crew-ssh screen <host> [--lines N] [--wait S]');
+  const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? +args[i + 1] || 0 : 0; };
+  request({ op: 'screen', host, lines: opt('--lines') || 60, wait: opt('--wait') });
+} else if (cmd === 'send' || cmd === 'type') {
+  const host = args.shift();
+  if (!host) die('which host? Usage: crew-ssh send <host> [--keys K1,K2] [--wait S] ["<text>"]');
+  const keys = [];
+  let wait = 0;
+  // Options first; the text is the rest. `--` before the text is accepted but not needed (Codex
+  // can't match its rules on a PowerShell line with a bare `--`, so it would sandbox the call).
+  while (args.length && /^--(keys|key|wait)$/.test(args[0])) {
+    const opt = args.shift();
+    const value = () => { if (!args.length) die(`${opt} needs a value`); return args.shift(); };
+    if (opt === '--keys') keys.push(...value().split(',').filter((k) => k !== ''));
+    else if (opt === '--key') keys.push(value());
+    else wait = +value() || 0;
+  }
+  if (args[0] === '--') args.shift();
+  request({ op: 'send', host, text: args.join(' '), keys, wait });
 } else if (cmd === 'cp' || cmd === 'copy') {
   if (args.length !== 2) die('usage: crew-ssh cp <local> <host>:<remote>  or  crew-ssh cp <host>:<remote> <local>');
   // host:path, but not a Windows drive letter (C:\...).

@@ -301,6 +301,12 @@
           <button type="button" id="ego-check" class="small-btn">Check again</button>
         </span>
       </div>
+      <div class="ego-box">
+        <span class="ego-title">Model providers</span>
+        <span class="field-hint">Your own APIs: relays, self-hosted services and other OpenAI- or Anthropic-compatible endpoints. Each one appears in the New session menus.</span>
+        <div id="provider-list"></div>
+        <span class="ego-actions"><button type="button" id="provider-add" class="small-btn">+ Add provider</button></span>
+      </div>
       <p class="hint">Command and arguments apply to sessions started after saving.</p>
       <div class="modal-actions">
         <button id="cfg-cancel">Cancel</button>
@@ -318,11 +324,13 @@
   <div id="ssh-prompt" class="modal hidden"><div class="modal-card"></div></div>
   <div id="ssh-cards"></div>
   <div id="agent-modal" class="modal hidden"><div class="modal-card host-card"></div></div>
+  <div id="provider-modal" class="modal hidden"><div class="modal-card host-card"></div></div>
   <div id="run-cards"></div>
 
   <script src="renderer.js"></script>
   <script src="git.js"></script>
   <script src="hosts.js"></script>
   <script src="agents.js"></script>
+  <script src="providers.js"></script>
 </body>
 </html>

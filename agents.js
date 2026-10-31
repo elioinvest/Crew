@@ -1,7 +1,8 @@
-// Agents the main session can hand work to by @-mention: saved profiles (a name, Claude or
-// Codex, a model, instructions, what it may do). The main agent runs one with
+// Agents the main session can hand work to by @-mention: saved profiles (a name, Claude, Codex
+// or a custom model provider, a model, instructions, what it may do). The main agent runs one with
 // `crew ask <agent> "<task>"`, one after another or several at once (--bg, then `crew wait`).
-// Each run is the agent's CLI in its non-interactive mode in the caller's folder; its events
+// Each run is the agent's CLI in its non-interactive mode in the caller's folder (a provider's
+// agent: the CLI that speaks its protocol, in the provider's own home, providers.js); its events
 // become a live card in the window, and its final answer goes back to the caller.
 
 const { app, ipcMain } = require('electron');
@@ -14,12 +15,12 @@ const { spawn, spawnSync } = require('child_process');
 const MAX_DEPTH = 2; // an agent's agent may delegate once more, no further
 const WAIT_MS = 9 * 60e3; // how long `crew ask` / `crew wait` block before saying "still running"
 
-let deps = null; // { getWin, cleanEnv, sessionEnv, shellCommand, getConfig, onRunDone }
+let deps = null; // { getWin, cleanEnv, sessionEnv, shellCommand, getConfig, onRunDone, writeCodexRules, providerLaunch, applyEnv, hasProvider }
 const file = (name) => path.join(app.getPath('userData'), name);
 
 // ---------- the agents ----------
 
-// { id, name, cli: 'claude' | 'codex', model, effort, instructions, access: 'read' | 'edit' | 'full' }
+// { id, name, cli: 'claude' | 'codex' | 'provider:<id>', model, effort, instructions, access: 'read' | 'edit' | 'full' }
 let agents = null;
 function allAgents() {
   if (!agents) { try { agents = JSON.parse(fs.readFileSync(file('agents.json'), 'utf8')); } catch { agents = []; } }
@@ -105,11 +106,26 @@ function startRun(agent, task, { cwd, caller, depth }) {
   };
   runs.set(id, r);
   const cfg = deps.getConfig();
-  const env = { ...deps.sessionEnv(deps.cleanEnv(), '', agent.cli), CREW_DEPTH: String(depth + 1), CREW_RUN_ID: id };
+  let env = { ...deps.sessionEnv(deps.cleanEnv(), '', agent.cli), CREW_DEPTH: String(depth + 1), CREW_RUN_ID: id };
+  // A custom provider's agent runs on the CLI that speaks its protocol (Codex or Claude Code), in the
+  // provider's own home and with its model and effort (providers.js).
+  let engine = agent.cli;
+  let pre = [];
+  let opts = agent;
+  if (agent.cli.startsWith('provider:')) {
+    const run = deps.providerLaunch(agent.cli.slice(9), { model: agent.model, effort: agent.effort });
+    if (!run) { finish(r, 'failed', { error: 'Its model provider no longer exists in Crew.' }); return r; }
+    engine = run.cli;
+    pre = run.args;
+    env = deps.applyEnv(env, run.env);
+    opts = { ...agent, model: '', effort: '' }; // they come with the provider's launch
+  }
+  r.engine = engine;
   let argv;
   let input;
-  if (agent.cli === 'codex') {
-    argv = [cfg.codexCommand || 'codex', ...codexArgs(agent, cwd)];
+  if (engine === 'codex') {
+    deps.writeCodexRules({ always: true }); // lets crew-ssh and crew out of Codex's sandbox
+    argv = [cfg.codexCommand || 'codex', ...pre, ...codexArgs(opts, cwd)];
     input = agent.instructions?.trim() ? `${agent.instructions.trim()}\n\n---\n\nYour task:\n${task}` : task;
   } else {
     let promptFile = null;
@@ -118,7 +134,7 @@ function startRun(agent, task, { cwd, caller, depth }) {
       fs.writeFileSync(promptFile, `You are ${agent.name}, an agent another agent handed a task to through Crew. Do the task, then end with your answer: it's returned to them as is.\n\n${agent.instructions.trim()}\n`);
       r.promptFile = promptFile;
     }
-    argv = [(cfg.claudeCommand || 'claude').split(/\s+/)[0], ...claudeArgs(agent, promptFile)];
+    argv = [(cfg.claudeCommand || 'claude').split(/\s+/)[0], ...pre, ...claudeArgs(opts, promptFile)];
     input = task;
   }
   const [cmd, args] = deps.shellCommand(argv);
@@ -161,7 +177,7 @@ function onEvent(r, line) {
   let e;
   try { e = JSON.parse(line); } catch { return; }
   let activity = null;
-  if (r.agent.cli === 'claude') {
+  if (r.engine === 'claude') {
     if (e.type === 'system' && e.session_id) r.sessionId = e.session_id;
     if (e.type === 'assistant') {
       for (const c of e.message?.content || []) {
@@ -331,7 +347,8 @@ ipcMain.handle('agents:save', (_e, input) => {
   if (!name) return { error: 'Give the agent a name (no spaces), e.g. CodeReviewerAgent.' };
   if (list.some((a) => a.id !== input.id && a.name.toLowerCase() === name.toLowerCase())) return { error: `There's already an agent named ${name}.` };
   const a = list.find((x) => x.id === input.id) || { id: crypto.randomUUID() };
-  Object.assign(a, { name, cli: input.cli === 'codex' ? 'codex' : 'claude', model: String(input.model || '').trim(), effort: /^[a-z]{2,10}$/.test(input.effort || '') ? input.effort : '', instructions: String(input.instructions || '').trim(), access: ['read', 'edit', 'full'].includes(input.access) ? input.access : 'read' });
+  const cli = input.cli === 'codex' ? 'codex' : /^provider:/.test(input.cli || '') && deps.hasProvider(input.cli.slice(9)) ? input.cli : 'claude';
+  Object.assign(a, { name, cli, model: String(input.model || '').trim(), effort: /^[a-z]{2,10}$/.test(input.effort || '') ? input.effort : '', instructions: String(input.instructions || '').trim(), access: ['read', 'edit', 'full'].includes(input.access) ? input.access : 'read' });
   if (!list.includes(a)) list.push(a);
   saveAgents();
   return a;

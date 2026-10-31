@@ -19,6 +19,8 @@ const state = {
   lastProject: null,
   renaming: null, // sessionId being renamed inline
   agentOk: new Set(), // agents whose CLI was found, so later sessions skip the check
+  providers: [], // custom model providers (providers.js)
+  bindings: {}, // session id -> the custom provider it runs on
 };
 
 // ---------- helpers ----------
@@ -62,6 +64,12 @@ const AGENTS = {
 const SSH_KIND = { label: 'SSH', group: 'Terminal', badge: '<svg class="agent-badge ssh" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>' };
 const agentInfo = (agent) => AGENTS[agent] || SSH_KIND;
 
+// The custom provider a session runs on (providers.js), or null for the CLI's own account.
+function providerOf(sessionId) {
+  const id = findSession(sessionId)?.provider || state.terms.get(sessionId)?.provider || state.pendingNew.get(sessionId)?.provider || state.bindings[sessionId]?.provider;
+  return id ? state.providers.find((p) => p.id === id) || null : null;
+}
+
 function findProject(p) {
   return state.projects.find((x) => norm(x.path) === norm(p));
 }
@@ -79,7 +87,7 @@ function sessionTitle(sessionId) {
   const s = findSession(sessionId);
   if (s) return s.title;
   const agent = state.terms.get(sessionId)?.agent || state.pendingNew.get(sessionId)?.agent;
-  return `New ${AGENTS[agent]?.label || ''} session`.replace('  ', ' ');
+  return `New ${providerOf(sessionId)?.name || AGENTS[agent]?.label || ''} session`.replace('  ', ' ');
 }
 
 // ---------- sidebar ----------
@@ -124,22 +132,36 @@ function renderSidebar() {
     projectDragHandlers(row, p);
     projectListEl.append(row);
 
-    // Sessions are grouped by agent (Claude first, then GPT); each group folds and pages on its own.
+    // Sessions are grouped by agent (Claude first, then GPT), then one group per custom provider
+    // (its sessions run on Claude Code or Codex, but are listed under the provider); each group
+    // folds and pages on its own.
     const list = el('div', { class: 'sessions' });
-    for (const agent of Object.keys(AGENTS)) {
-      const group = sessions.filter((s) => (s.agent || 'claude') === agent);
+    const groups = [
+      ...Object.keys(AGENTS).map((agent) => ({
+        key: agent, label: AGENTS[agent].group, icon: () => el('span', { class: 'agent-icon', html: AGENTS[agent].badge }),
+        title: `New ${AGENTS[agent].label} session`, add: () => newSession(p.path, agent),
+        has: (s) => (s.agent || 'claude') === agent && !providerOf(s.id),
+      })),
+      ...state.providers.map((prov) => ({
+        key: `provider:${prov.id}`, label: prov.name, icon: () => el('span', { class: 'agent-icon' }, providerIcon(prov)),
+        title: `New ${prov.name} session`, add: () => newSession(p.path, prov.cli, prov.id),
+        has: (s) => providerOf(s.id)?.id === prov.id,
+      })),
+    ];
+    for (const g of groups) {
+      const group = sessions.filter(g.has);
       if (group.length === 0) continue;
-      const key = `${p.path}::${agent}`;
+      const key = `${p.path}::${g.key}`;
       const folded = !q && !!state.config.collapsed[key];
       const head = el('div', {
         class: `row-item agent-group${folded ? ' collapsed' : ''}`,
         onclick: () => toggleProject(key),
       },
-      el('span', { class: 'agent-icon', html: AGENTS[agent].badge }),
-      el('span', { class: 'label' }, AGENTS[agent].group),
+      g.icon(),
+      el('span', { class: 'label' }, g.label),
       el('span', { class: 'meta' }, String(group.length)),
       el('span', { class: 'actions' },
-        el('button', { class: 'icon-btn small', title: `New ${AGENTS[agent].label} session`, html: icons.plus, onclick: (e) => { e.stopPropagation(); newSession(p.path, agent); } })),
+        el('button', { class: 'icon-btn small', title: g.title, html: icons.plus, onclick: (e) => { e.stopPropagation(); g.add(); } })),
       el('span', { html: icons.chev }));
       list.append(head);
       if (folded) continue;
@@ -251,8 +273,8 @@ const menuEl = $('#menu');
 function showMenu(e, items, above) {
   menuEl.innerHTML = '';
   for (const it of items) {
-    const cls = [it.danger && 'danger', it.checked && 'checked', it.separator && 'separator'].filter(Boolean).join(' ');
-    menuEl.append(el('button', { class: cls, onclick: () => { hideMenu(); it.action(); } }, it.label));
+    const cls = [it.danger && 'danger', it.checked && 'checked', it.separator && 'separator', it.divider && 'divider'].filter(Boolean).join(' ');
+    menuEl.append(el('button', { class: cls, onclick: () => { hideMenu(); it.action(); } }, it.label, it.hint ? el('span', { class: 'menu-hint' }, it.hint) : null));
   }
   menuEl.classList.remove('hidden');
   const r = menuEl.getBoundingClientRect();
@@ -266,16 +288,23 @@ function hideMenu() { menuEl.classList.add('hidden'); }
 document.addEventListener('mousedown', (e) => { if (!menuEl.contains(e.target)) hideMenu(); });
 
 function newSessionMenu(e, projectPath) {
-  showMenu(e, Object.entries(AGENTS).map(([agent, a]) => ({
-    label: `New ${a.label} session`, action: () => newSession(projectPath, agent),
-  })));
+  showMenu(e, [
+    ...Object.entries(AGENTS).map(([agent, a]) => ({ label: `New ${a.label} session`, action: () => newSession(projectPath, agent) })),
+    ...providerMenuItems(projectPath),
+  ]);
+}
+
+// "New <provider> session" for each custom provider; the first one opens a separated group.
+function providerMenuItems(projectPath) {
+  return state.providers.map((p, i) => ({ label: `New ${p.name} session`, divider: i === 0, action: () => newSession(projectPath, p.cli, p.id) }));
 }
 
 function projectMenu(e, p) {
   showMenu(e, [
     { label: 'New Claude session', action: () => newSession(p.path, 'claude') },
     { label: 'New Codex session', action: () => newSession(p.path, 'codex') },
-    { label: 'Move up', action: () => shiftProject(p, -1) },
+    ...providerMenuItems(p.path),
+    { label: 'Move up', divider: state.providers.length > 0, action: () => shiftProject(p, -1) },
     { label: 'Move down', action: () => shiftProject(p, 1) },
     { label: 'Move to top', action: () => shiftProject(p, -Infinity) },
     { label: 'Open in Git', action: () => openGit(p.path) },
@@ -379,7 +408,7 @@ function isOnDisk(sessionId) {
 }
 
 // `prompt`: a new session's first message, given to the agent as it starts.
-async function openSession(projectPath, sessionId, resume, { agent = 'claude', cwd, prompt } = {}) {
+async function openSession(projectPath, sessionId, resume, { agent = 'claude', cwd, prompt, provider } = {}) {
   if (!isHostWorkspace(projectPath)) state.lastProject = projectPath; // "New session" stays on projects
   if (state.terms.has(sessionId)) {
     const t = state.terms.get(sessionId);
@@ -388,9 +417,14 @@ async function openSession(projectPath, sessionId, resume, { agent = 'claude', c
     return;
   }
 
-  makeTermEntry(sessionId, { projectPath, cwd, agent }).firstPrompt = prompt;
+  const entry = makeTermEntry(sessionId, { projectPath, cwd, agent });
+  entry.firstPrompt = prompt;
+  entry.provider = resume ? findSession(sessionId)?.provider || state.bindings[sessionId]?.provider || null : provider || null;
+  // The model and effort picked in a provider session last time (providers.js keeps them).
+  entry.providerModel = resume ? state.bindings[sessionId]?.model : undefined;
+  entry.providerEffort = resume ? state.bindings[sessionId]?.effort : undefined;
   activate(sessionId);
-  if (!resume) state.pendingNew.set(sessionId, { projectPath, agent });
+  if (!resume) state.pendingNew.set(sessionId, { projectPath, agent, provider });
   await respawn(sessionId, resume);
   renderSidebar();
 }
@@ -441,9 +475,39 @@ function makeTermEntry(sessionId, { projectPath, cwd, agent }) {
     return true;
   });
   term.onData((d) => { if (entry.termId && !entry.exited) api.write(entry.termId, d); });
-  term.onWriteParsed(() => scheduleScreenRead(entry));
+  term.attachCustomWheelEventHandler((e) => programWheel(entry, e));
+  term.onWriteParsed(() => {
+    scheduleScreenRead(entry);
+    // While a program owns the wheel (Codex), the terminal's scrollbar only shows stale lines from
+    // before it started and never moves, so it's hidden.
+    container.classList.toggle('program-mouse', term.modes.mouseTrackingMode !== 'none');
+  });
   term.onResize(({ cols, rows }) => { if (entry.termId) api.resize(entry.termId, cols, rows); });
   return entry;
+}
+
+// The wheel over a program that takes over the mouse. xterm sends it one wheel report per notch,
+// and Codex moves one row per report, so a notch barely moves it while the same notch scrolls a
+// Claude pane (the terminal's own scrollback) by several rows. Send as many reports as the rows
+// the terminal would scroll itself, at the pointer's cell. Returns whether xterm handles it.
+function programWheel(entry, e) {
+  const term = entry.term;
+  if (term.modes.mouseTrackingMode === 'none' || !entry.termId || entry.exited || e.ctrlKey || e.shiftKey || !e.deltaY) return true;
+  const screen = term.element?.querySelector('.xterm-screen');
+  if (!screen) return true;
+  const r = screen.getBoundingClientRect();
+  const rowH = r.height / term.rows;
+  const rows = e.deltaMode === 1 ? e.deltaY : e.deltaMode === 2 ? e.deltaY * term.rows : e.deltaY / rowH;
+  entry.wheelRest = (entry.wheelRest || 0) + rows;
+  const n = Math.trunc(entry.wheelRest);
+  entry.wheelRest -= n;
+  if (n) {
+    const col = Math.min(term.cols, Math.max(1, Math.floor((e.clientX - r.left) / (r.width / term.cols)) + 1));
+    const row = Math.min(term.rows, Math.max(1, Math.floor((e.clientY - r.top) / rowH) + 1));
+    api.write(entry.termId, `\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)));
+  }
+  e.preventDefault();
+  return false;
 }
 
 // A new Codex session is re-keyed once its rollout file shows up, so look the id up by entry.
@@ -464,6 +528,9 @@ async function respawn(sessionId, resume) {
   const { termId, startedAt } = await api.spawn({
     agent: entry.agent, cwd: entry.cwd, sessionId, resume, cols: entry.term.cols, rows: entry.term.rows,
     prompt: resume ? undefined : entry.firstPrompt,
+    provider: entry.provider || undefined, // a resumed session uses the one it was started on (main)
+    model: entry.providerModel || undefined, // a model picked from the provider's list
+    effort: entry.providerEffort || undefined,
   });
   entry.firstPrompt = undefined; // sent once
   entry.termId = termId;
@@ -556,10 +623,10 @@ function recheckAgent(entry) {
   respawn(sessionId, isOnDisk(sessionId));
 }
 
-function newSession(projectPath, agent = state.config.defaultAgent || 'claude') {
-  if (agent !== state.config.defaultAgent) api.setConfig({ defaultAgent: agent }).then((c) => { state.config = c; });
-  state.config.defaultAgent = agent;
-  openSession(projectPath, crypto.randomUUID(), false, { agent });
+function newSession(projectPath, agent = state.config.defaultAgent || 'claude', provider = null) {
+  if (!provider && agent !== state.config.defaultAgent) api.setConfig({ defaultAgent: agent }).then((c) => { state.config = c; });
+  if (!provider) state.config.defaultAgent = agent;
+  openSession(projectPath, crypto.randomUUID(), false, { agent, provider });
 }
 
 // Show a session in the focused pane, or focus the pane already showing it. `focusInput: false`
@@ -580,7 +647,7 @@ function activate(sessionId, { focusInput = true } = {}) {
   $('#main-head').classList.toggle('idle', !entry);
   if (entry) {
     $('#head-title').textContent = sessionTitle(sessionId);
-    $('#head-path').textContent = `${agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}`;
+    $('#head-path').textContent = `${providerOf(sessionId)?.name || agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}`;
     if (switching) { inputEl.value = entry.draft; autosizeInput(); renderAttachments(); }
     loadSettings(sessionId);
     requestAnimationFrame(() => { safeFit(entry); if (focusInput) (entry.agent === 'ssh' ? entry.term : inputEl).focus(); });
@@ -835,8 +902,11 @@ function updatePaneHeads() {
     if (!ui) continue;
     const entry = state.terms.get(leaf.session);
     ui.title.textContent = entry ? sessionTitle(leaf.session) : 'Empty pane';
-    ui.title.title = entry ? `${agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}` : '';
-    ui.icon.innerHTML = entry ? agentInfo(entry.agent).badge : '';
+    const prov = entry && providerOf(leaf.session);
+    ui.title.title = entry ? `${prov ? prov.name : agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}` : '';
+    ui.icon.replaceChildren();
+    if (prov) ui.icon.append(providerIcon(prov));
+    else ui.icon.innerHTML = entry ? agentInfo(entry.agent).badge : '';
     ui.status.replaceChildren(...(entry && !entry.exited ? [statusEl(entry)] : []));
   }
 }
@@ -932,7 +1002,8 @@ function adoptCodexSessions() {
     if (!entry || !entry.startedAt) continue;
     const match = state.projects
       .flatMap((p) => p.sessions)
-      .filter((s) => s.agent === 'codex' && norm(s.cwd) === norm(entry.cwd) && s.created >= entry.startedAt - 5000 && !state.terms.has(s.id))
+      .filter((s) => s.agent === 'codex' && (s.provider || null) === (pn.provider || null) // a provider's sessions are in its own home
+        && norm(s.cwd) === norm(entry.cwd) && s.created >= entry.startedAt - 5000 && !state.terms.has(s.id))
       .sort((a, b) => a.created - b.created)[0];
     if (!match) continue;
     state.terms.delete(tempId);
@@ -947,6 +1018,7 @@ function adoptCodexSessions() {
 
 async function refresh() {
   state.projects = await api.listProjects();
+  state.bindings = await api.providerBindings();
   adoptCodexSessions();
   // Drop pending markers once the agent has written the session file.
   for (const [id] of state.pendingNew) {
@@ -1013,6 +1085,7 @@ $('#btn-settings').addEventListener('click', () => {
   $('#cfg-tray').checked = state.config.closeToTray !== false;
   $('#cfg-usage').checked = state.config.showUsage !== false;
   refreshEgo();
+  renderProviderList(); // providers.js
   $('#settings').classList.remove('hidden');
 });
 $('#cfg-cancel').addEventListener('click', () => $('#settings').classList.add('hidden'));
@@ -1464,12 +1537,21 @@ function renderComposer() {
   if (!entry || entry.agent === 'ssh') return;
   const s = currentSettings(entry);
   const codex = entry.agent === 'codex';
-  inputEl.placeholder = codex ? 'Ask Codex to do anything' : 'How can I help you today?';
+  const prov = providerOf(state.active);
+  inputEl.placeholder = prov ? `Ask ${prov.name} to do anything` : codex ? 'Ask Codex to do anything' : 'How can I help you today?';
   const proj = findProject(entry.projectPath);
   $('#chip-project').textContent = `${hostNameFor(entry.projectPath) || proj?.name || entry.projectPath.split(/[\\/]/).pop()} ▾`;
-  $('#chip-model').textContent = modelLabel(entry.agent, s.model);
-  $('#chip-effort').textContent = s.effort ? effortLabel(s.effort) : '';
-  $('#chip-mode').textContent = MODE_LABELS[s.mode] || (codex ? 'Permissions' : 'Manual');
+  if (prov) {
+    // A custom provider's session shows its own models and effort, not Claude's or Codex's.
+    const modelId = entry.providerModel || prov.defaultModel;
+    const m = prov.models.find((x) => x.id === modelId);
+    $('#chip-model').textContent = m ? m.name || m.id : modelId || 'Model';
+    $('#chip-effort').textContent = entry.providerEffort ? effortLabel(entry.providerEffort) : 'Effort';
+  } else {
+    $('#chip-model').textContent = modelLabel(entry.agent, s.model);
+    $('#chip-effort').textContent = s.effort ? effortLabel(s.effort) : '';
+  }
+  $('#chip-mode').textContent = (codex && entry.codexPermission) || MODE_LABELS[s.mode] || (codex ? 'Permissions' : 'Manual');
   $('#composer-hint').textContent = entry.missingEl ? 'Install the agent above to start this session'
     : entry.installing ? 'Installing…'
       : entry.exited ? 'Session stopped — press Enter to resume it' : '';
@@ -1774,11 +1856,6 @@ function setClaudeMode(entry, target) {
 }
 
 // Codex's /model and /permissions take no arguments: open its picker and hand over to the terminal.
-function openCodexPicker(entry, command) {
-  sendText(entry, command);
-  entry.term.focus();
-}
-
 // Claude's model list isn't stored anywhere readable (it's built into Claude Code and depends on
 // the account), so it's read from Claude's own /model picker, and picks are made in that picker.
 
@@ -1888,6 +1965,8 @@ function selectClaudeModel(entry, model) {
 $('#chip-model').addEventListener('click', async (e) => {
   const entry = activeEntry();
   if (!entry || entry.exited) return;
+  const prov = providerOf(state.active);
+  if (prov) return providerModelMenu(e, entry, prov);
   if (entry.agent === 'codex') return codexModelMenu(e, entry);
   const rect = e.currentTarget.getBoundingClientRect();
   let models = cachedModels();
@@ -1908,9 +1987,51 @@ $('#chip-model').addEventListener('click', async (e) => {
   ], rect);
 });
 
+// A custom provider's models and effort, switched in the running session: Claude Code with
+// /model <id> and /effort <level>; Codex with /model <id> [--reasoning=<level>], which accepts the
+// provider's models because Crew gives Codex a catalog of them (providers.js).
+function providerModelMenu(e, entry, prov) {
+  const current = entry.providerModel || prov.defaultModel;
+  if (!prov.models.length) { $('#composer-hint').textContent = `No models are listed for ${prov.name}: add them in Settings → Model providers`; return; }
+  showMenu(e, prov.models.map((m) => ({
+    label: m.name && m.name !== m.id ? `${m.name}  ·  ${m.id}` : m.id,
+    checked: m.id === current,
+    action: () => {
+      entry.providerModel = m.id;
+      if (entry.agent === 'codex') sendText(entry, entry.providerEffort ? `/model ${m.id} --reasoning=${entry.providerEffort}` : `/model ${m.id}`); // Codex's prompt isn't Claude's: send once
+      else sendCommand(entry, `/model ${m.id}`);
+      rememberProviderPicks(entry);
+      renderComposer();
+    },
+  })), e.currentTarget.getBoundingClientRect());
+}
+
+const PROVIDER_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
+function providerEffortMenu(e, entry) {
+  const prov = providerOf(state.active);
+  const pick = (lvl) => {
+    entry.providerEffort = lvl || undefined;
+    if (lvl && entry.agent === 'codex') sendText(entry, `/model ${entry.providerModel || prov?.defaultModel} --reasoning=${lvl}`);
+    else if (lvl) sendCommand(entry, `/effort ${lvl}`);
+    rememberProviderPicks(entry);
+    renderComposer();
+  };
+  showMenu(e, [
+    { label: 'Default (the model\'s)', checked: !entry.providerEffort, action: () => pick('') },
+    ...PROVIDER_EFFORTS.map((lvl) => ({ label: effortLabel(lvl), checked: entry.providerEffort === lvl, action: () => pick(lvl) })),
+  ], e.currentTarget.getBoundingClientRect());
+}
+
+// Keeps a provider session's picks for its next resume.
+function rememberProviderPicks(entry) {
+  const id = currentId(entry);
+  if (id && entry.provider) api.bindProvider(id, entry.provider, { model: entry.providerModel, effort: entry.providerEffort });
+}
+
 $('#chip-effort').addEventListener('click', (e) => {
   const entry = activeEntry();
   if (!entry || entry.exited) return;
+  if (providerOf(state.active)) return providerEffortMenu(e, entry);
   if (entry.agent === 'codex') return codexEffortMenu(e, entry);
   const current = currentSettings(entry).effort;
   showMenu(e, CLAUDE_EFFORTS.map((lvl) => ({
@@ -1923,7 +2044,7 @@ $('#chip-effort').addEventListener('click', (e) => {
 $('#chip-mode').addEventListener('click', (e) => {
   const entry = activeEntry();
   if (!entry || entry.exited) return;
-  if (entry.agent === 'codex') return openCodexPicker(entry, '/permissions');
+  if (entry.agent === 'codex') return codexPermissionsMenu(e, entry);
   const current = currentSettings(entry).mode;
   showMenu(e, CLAUDE_MODES.map(([mode, label]) => ({
     label,
@@ -1950,7 +2071,7 @@ $('#chip-project').addEventListener('click', (e) => {
 // depend on the account, so they're read from the picker and picks are made in it, as for Claude.
 
 const CODEX_CACHE_KEY = 'codexModels';
-const CODEX_HEADINGS = /Select Model and Effort|Select Reasoning Level|Advanced Reasoning/;
+const CODEX_HEADINGS = /Select Model and Effort|Select Reasoning Level|Advanced Reasoning|Update Model Permissions|Enable full access/;
 
 function cachedCodexModels() {
   try {
@@ -2001,6 +2122,45 @@ async function chooseCodexRow(entry, index) {
   if (!p || p.highlighted !== index) return false;
   api.write(entry.termId, '\r');
   return true;
+}
+
+// Codex's permission levels, as its /permissions picker names them. Crew shows them as a menu and
+// makes the pick in that picker itself, confirming Full Access's "Enable full access?" step.
+const CODEX_PERMISSIONS = [
+  ['Ask for approval', 'Read and edit workspace files and run commands; asks for internet access or edits outside the workspace'],
+  ['Approve for me', 'Only asks for actions detected as potentially unsafe'],
+  ['Full Access', 'Use with caution: edits files outside this workspace and uses the internet without asking'],
+  ['Read Only', 'Reads workspace files; asks for edits or internet access'],
+];
+function codexPermissionsMenu(e, entry) {
+  showMenu(e, CODEX_PERMISSIONS.map(([label, hint]) => ({
+    label, hint, checked: entry.codexPermission === label, action: () => selectCodexPermission(entry, label),
+  })), e.currentTarget.getBoundingClientRect());
+}
+
+function selectCodexPermission(entry, label) {
+  return queue(entry, async () => {
+    sendText(entry, '/permissions');
+    const p = await waitForCodexStep(entry, /Update Model Permissions/);
+    const row = p?.rows.find((r) => r.label.toLowerCase() === label.toLowerCase());
+    if (!row) {
+      if (p) api.write(entry.termId, '\x1b');
+      $('#composer-hint').textContent = p ? `Codex doesn't offer "${label}" here` : 'Codex didn\'t open its permissions — try again when it\'s idle';
+      return;
+    }
+    if (!(await chooseCodexRow(entry, row.index))) return;
+    if (label === 'Full Access') {
+      // Codex asks once more, unless the user turned that warning off.
+      for (let i = 0; i < 8; i++) {
+        const c = readCodexPicker(entry);
+        const yes = c && /Enable full access/.test(c.heading) && c.rows.find((r) => /^Yes, continue anyway/i.test(r.label));
+        if (yes && c.highlighted) { await chooseCodexRow(entry, yes.index); break; }
+        await sleep(200);
+      }
+    }
+    entry.codexPermission = label;
+    renderComposer();
+  });
 }
 
 async function openCodexModelStep(entry) {
@@ -2181,6 +2341,7 @@ api.onUsageChanged(() => loadUsage());
 
 (async () => {
   state.config = await api.getConfig();
+  state.providers = await api.listProviders();
   applyLanguage(state.config.language); // i18n.js
   applyTheme();
   restoreLayout();

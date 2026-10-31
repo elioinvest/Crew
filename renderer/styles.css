@@ -375,7 +375,34 @@ body:not(.split) .pane-head, body:not(.split) .pane-empty { display: none; }
 /* Padding lives on .xterm (not .term): FitAddon subtracts the .xterm padding but measures .term at its full border-box height. */
 .term .xterm { height: 100%; padding: 10px 6px 6px 16px; }
 .term .xterm-viewport { background: transparent !important; }
+/* custom model providers (providers.js) */
+.provider-icon { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 4px; overflow: hidden; font-size: 12px; line-height: 1; }
+.provider-icon img { width: 100%; height: 100%; object-fit: contain; }
+.provider-icon.letter { color: #fff; font-size: 10px; font-weight: 600; }
+.provider-icon.large { width: 32px; height: 32px; flex-basis: 32px; border-radius: 8px; font-size: 22px; }
+.provider-icon.large.letter { font-size: 16px; }
+.row-item.session .provider-icon { margin-right: 2px; }
+#provider-list { display: flex; flex-direction: column; gap: 6px; }
+.provider-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.provider-row .provider-name { color: var(--text); font-weight: 500; }
+.provider-row .provider-meta { color: var(--muted); font-size: 12px; }
+.provider-row .spacer { flex: 1; }
+.provider-row .small-btn.danger { color: #c4462d; }
+.provider-icon-row { display: flex; align-items: center; gap: 8px; }
+.provider-icon-row .emoji-input { width: 90px; flex: 0 0 90px; }
+.provider-models-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 10px; }
+/* flex-shrink: 0, or the scrolling list shrinks to nothing inside the (height-limited) modal */
+.provider-models { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; flex-shrink: 0; }
+.provider-model { display: flex; align-items: center; gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; }
+.provider-model.default { border-color: var(--accent); }
+.provider-model input { flex: 1 1 0; min-width: 0; }
+.provider-model input.model-id { flex-grow: 1.4; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+.provider-model .icon-btn svg { fill: none; }
+.provider-model .model-star.on svg { fill: var(--accent); stroke: var(--accent); }
+.provider-models-empty { border: 1px dashed var(--border); border-radius: 8px; padding: 14px; text-align: center; font-size: 12.5px; color: var(--muted); }
+.provider-status:empty { display: none; }
 .xterm .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.term.program-mouse .xterm-viewport::-webkit-scrollbar-thumb { background: transparent; }
 .xterm .xterm-viewport::-webkit-scrollbar-thumb { background: var(--active); border-radius: 4px; }
 
 #empty {
@@ -419,6 +446,7 @@ button.primary:hover { opacity: .85; }
 .menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
 .menu button:hover { background: var(--hover); }
 .menu button.danger { color: #c4462d; }
+.menu .menu-hint { display: block; font-size: 11.5px; color: var(--muted); margin-top: 1px; max-width: 320px; white-space: normal; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.25); display: flex; align-items: center; justify-content: center; z-index: 60; }
 .modal-card { background: var(--main-bg); border-radius: 14px; padding: 22px 24px; width: 460px; box-shadow: 0 20px 50px rgba(0,0,0,.2); display: flex; flex-direction: column; gap: 12px; }
@@ -509,6 +537,9 @@ button.primary:hover { opacity: .85; }
 
 .menu button.separator { margin-top: 5px; position: relative; color: var(--muted); }
 .menu button.separator::before { content: ''; position: absolute; left: 6px; right: 6px; top: -3px; border-top: 1px solid var(--border); }
+/* a line above the item, in the normal color (separator also dims it, for minor actions) */
+.menu button.divider { margin-top: 5px; position: relative; }
+.menu button.divider::before { content: ''; position: absolute; left: 6px; right: 6px; top: -3px; border-top: 1px solid var(--border); }
 
 /* ---------- composer attachments ---------- */
 

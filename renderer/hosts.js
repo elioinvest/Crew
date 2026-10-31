@@ -78,7 +78,7 @@ function hostRows(h) {
       oncontextmenu: (e) => { e.preventDefault(); sessionMenu(e, { path: h.workspace }, s); },
     },
     state.terms.has(s.id) && !state.terms.get(s.id).exited ? statusEl(state.terms.get(s.id)) : null,
-    el('span', { class: 'agent-icon', html: AGENTS[s.agent || 'claude'].badge }),
+    sessionIcon(s),
     el('span', { class: 'label' }, s.title || 'Untitled'),
     el('span', { class: 'meta' }, s.pending ? '' : relTime(s.mtime))));
   }
@@ -171,7 +171,7 @@ async function showHostTerminal(h) {
 
 // Opens the host's workspace: its terminal, and beside it an agent session (the given one, else
 // its latest, else a new one), each in a pane of its own.
-async function openHost(h, { session = null, agent = null } = {}) {
+async function openHost(h, { session = null, agent = null, provider = null } = {}) {
   h.workspace = (await api.hostWorkspace(h.id)) || h.workspace; // also refreshes CLAUDE.md / AGENTS.md
   const target = session || (agent ? null : hostSessions(h)[0]) || null;
 
@@ -191,7 +191,7 @@ async function openHost(h, { session = null, agent = null } = {}) {
 
   const before = new Set(state.terms.keys());
   if (target) openSessionRow({ path: h.workspace }, target);
-  else newSession(h.workspace, agent || state.config.defaultAgent || 'claude');
+  else newSession(h.workspace, agent || state.config.defaultAgent || 'claude', provider);
   for (const id of state.terms.keys()) if (!before.has(id)) trustWorkspace(id, h);
 }
 
@@ -221,15 +221,29 @@ function hostWhere(projectPath) {
 }
 const hostNameFor = (projectPath) => (isHostWorkspace(projectPath) ? hostsList.find((x) => norm(x.workspace) === norm(projectPath))?.name : null);
 
+// A host's agent sessions: Claude, Codex, or a custom provider (Crew's own agent, which gets the
+// host's instructions from the workspace's AGENTS.md like the others).
+function hostAgentItems(h, onHost) {
+  return [
+    ...Object.entries(AGENTS).map(([agent, a]) => ({ label: `New ${a.label} session${onHost ? ` on ${h.name}` : ''}`, action: () => openHost(h, { agent }) })),
+    ...state.providers.map((p, i) => ({ label: `New ${p.name} session${onHost ? ` on ${h.name}` : ''}`, divider: i === 0, action: () => openHost(h, { agent: p.cli, provider: p.id }) })),
+  ];
+}
+
+// A session row's icon: its provider's, else Claude's or Codex's.
+function sessionIcon(s) {
+  const prov = providerOf(s.id);
+  return prov ? el('span', { class: 'agent-icon' }, providerIcon(prov)) : el('span', { class: 'agent-icon', html: (AGENTS[s.agent] || AGENTS.claude).badge });
+}
+
 function newHostSessionMenu(e, h) {
-  showMenu(e, Object.entries(AGENTS).map(([agent, a]) => ({ label: `New ${a.label} session on ${h.name}`, action: () => openHost(h, { agent }) })));
+  showMenu(e, hostAgentItems(h, true));
 }
 
 function hostMenu(e, h) {
   const items = [
     { label: 'Open terminal and agent', action: () => openHost(h) },
-    { label: 'New Claude session', action: () => openHost(h, { agent: 'claude' }) },
-    { label: 'New Codex session', action: () => openHost(h, { agent: 'codex' }) },
+    ...hostAgentItems(h, false),
     { label: 'Edit', separator: true, action: () => editHost(h) },
     { label: 'Test connection', action: () => testHost(h) },
   ];
@@ -280,6 +294,7 @@ $('#hosts-toggle').addEventListener('click', () => {
 function explainHosts() {
   infoBox('How agents use these hosts', [
     'Sessions started in Crew have a crew-ssh command. Ask the agent things like "check the disk on web-1" or "restart nginx on the staging servers" and it runs crew-ssh with the host\'s name.',
+    'While a host\'s terminal is open, the agent shares it with you: it reads what\'s on screen and types into it (commands, answers to prompts, keys like Ctrl+C), and you see everything it types. Passwords and codes asked in the terminal are yours to type.',
     'Crew signs in with the host\'s saved key, ssh-agent or password. The agent never sees credentials.',
     'Commands that only read (df, ps, systemctl status, journalctl…) run at once. Anything that could change something waits for you to approve it here. Change this per host.',
     'The first connection to a host shows its key fingerprint to trust. If the key later changes, Crew blocks the connection.',
@@ -497,7 +512,7 @@ function showApproval(p) {
   const who = p.agent && AGENTS[p.agent] ? AGENTS[p.agent].label : 'An agent';
   const session = p.session && state.terms.has(p.session) ? sessionTitle(p.session) : '';
   const answer = (v) => { api.answerSsh(p.id, v); card.remove(); };
-  const verb = p.action === 'upload' ? 'upload a file to' : p.action === 'download' ? 'download a file from' : 'run on';
+  const verb = { upload: 'upload a file to', download: 'download a file from', input: 'type into your terminal on' }[p.action] || 'run on';
   const card = el('div', { class: 'ssh-card' },
     el('div', { class: 'ssh-card-head' },
       el('span', { class: 'host-icon', html: hostIcon }),

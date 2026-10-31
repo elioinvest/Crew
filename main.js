@@ -32,6 +32,7 @@ const ssh = require('./ssh');
 const agents = require('./agents');
 // ego lite, the agents' browser: its official skill and status (Settings).
 const browserForAgents = require('./browser');
+const providers = require('./providers');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -251,21 +252,27 @@ function readCodexMeta(file) {
   return meta;
 }
 
-let codexNamesCache = { mtimeMs: 0, size: -1, names: {} };
-function readCodexNames() {
+const codexNamesCache = new Map(); // index file -> { mtimeMs, size, names }
+function readCodexNames(index = CODEX_INDEX) {
   try {
-    const st = fs.statSync(CODEX_INDEX);
-    if (st.mtimeMs === codexNamesCache.mtimeMs && st.size === codexNamesCache.size) return codexNamesCache.names;
+    const st = fs.statSync(index);
+    const c = codexNamesCache.get(index);
+    if (c && st.mtimeMs === c.mtimeMs && st.size === c.size) return c.names;
     const names = {};
-    for (const o of parseLines(fs.readFileSync(CODEX_INDEX, 'utf8'), false, false)) {
+    for (const o of parseLines(fs.readFileSync(index, 'utf8'), false, false)) {
       if (o.id && o.thread_name) names[o.id] = o.thread_name;
     }
-    codexNamesCache = { mtimeMs: st.mtimeMs, size: st.size, names };
+    codexNamesCache.set(index, { mtimeMs: st.mtimeMs, size: st.size, names });
     return names;
   } catch {
     return {};
   }
 }
+
+// Where sessions live: the user's own Claude Code and Codex, and each custom provider's own home
+// (providers.js), whose sessions carry the provider's id.
+const claudeRoots = () => [{ dir: CLAUDE_DIR }, ...providers.homes().filter((h) => h.cli === 'claude').map((h) => ({ dir: path.join(h.home, 'projects'), provider: h.id }))];
+const codexRoots = () => [{ home: CODEX_HOME }, ...providers.homes().filter((h) => h.cli === 'codex').map((h) => ({ home: h.home, provider: h.id }))];
 
 function listFiles(dir, ext) {
   let out = [];
@@ -299,11 +306,12 @@ function normPath(p) {
 function scanProjects() {
   const projects = new Map(); // normPath -> project
 
+  for (const root of claudeRoots()) {
   let dirs = [];
-  try { dirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { /* none yet */ }
+  try { dirs = fs.readdirSync(root.dir, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { /* none yet */ }
 
   for (const d of dirs) {
-    const dir = path.join(CLAUDE_DIR, d.name);
+    const dir = path.join(root.dir, d.name);
     let files = [];
     try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { continue; }
     const sessions = [];
@@ -311,7 +319,7 @@ function scanProjects() {
       try {
         const meta = readSessionMeta(path.join(dir, f));
         if (meta.size === 0) continue;
-        sessions.push(meta);
+        sessions.push(root.provider ? { ...meta, provider: root.provider } : meta);
       } catch { /* unreadable */ }
     }
     const cwd = sessions.find((s) => s.cwd)?.cwd || decodeDirName(d.name);
@@ -320,9 +328,11 @@ function scanProjects() {
     proj.sessions.push(...sessions.filter((s) => s.title)); // skip sessions with no prompt yet
     projects.set(key, proj);
   }
+  }
 
-  const codexNames = readCodexNames();
-  for (const f of listFiles(CODEX_SESSIONS, '.jsonl')) {
+  for (const root of codexRoots()) {
+  const codexNames = readCodexNames(path.join(root.home, 'session_index.jsonl'));
+  for (const f of listFiles(path.join(root.home, 'sessions'), '.jsonl')) {
     let meta;
     try { meta = readCodexMeta(f); } catch { continue; }
     if (!meta) continue;
@@ -332,8 +342,9 @@ function scanProjects() {
     const projPath = chat ? CODEX_CHATS : meta.cwd;
     const key = normPath(projPath);
     const proj = projects.get(key) || { path: projPath, name: chat ? 'Codex chats' : path.basename(projPath) || projPath, sessions: [] };
-    proj.sessions.push({ ...meta, title });
+    proj.sessions.push({ ...meta, title, ...(root.provider ? { provider: root.provider } : {}) });
     projects.set(key, proj);
+  }
   }
 
   for (const p of config.extraProjects) {
@@ -382,6 +393,9 @@ function startWatcher() {
   watch(CLAUDE_DIR, { recursive: true }, (f) => f.endsWith('.jsonl'));
   if (fs.existsSync(CODEX_SESSIONS)) watch(CODEX_SESSIONS, { recursive: true }, (f) => f.endsWith('.jsonl'));
   if (fs.existsSync(CODEX_HOME)) watch(CODEX_HOME, {}, (f) => f === 'session_index.jsonl');
+  // The custom providers' homes: their sessions and Codex name indexes.
+  fs.mkdirSync(providers.homesRoot(), { recursive: true });
+  watch(providers.homesRoot(), { recursive: true }, (f) => f.endsWith('.jsonl'));
 }
 
 // ---------- pty ----------
@@ -471,14 +485,15 @@ ipcMain.handle('agent:check', (_e, agent) => {
 // Claude takes the session id up front; Codex picks its own, so a new Codex session
 // is matched to its rollout file later by cwd and start time (see the renderer's refresh()).
 // A new session can start with a first prompt, which both CLIs take as their last argument.
-function agentArgv(agent, id, resume, prompt) {
+// `pre`: arguments a custom provider adds (providers.js), right after the command.
+function agentArgv(agent, id, resume, prompt, pre = []) {
   const first = !resume && prompt ? [prompt.replace(/\s*\r?\n\s*/g, ' ')] : []; // one line for cmd.exe
   if (agent === 'codex') {
     const extra = splitArgs(config.codexArgs);
-    return [config.codexCommand || 'codex', ...(resume ? ['resume', ...extra, id] : [...extra, ...first])];
+    return [config.codexCommand || 'codex', ...pre, ...(resume ? ['resume', ...extra, id] : [...extra, ...first])];
   }
   const usage = config.showUsage !== false && usageHookReady() ? ['--settings', usagePaths().settings] : [];
-  return [config.claudeCommand || 'claude', ...usage, ...splitArgs(config.extraArgs), ...(resume ? ['--resume', id] : ['--session-id', id, ...first])];
+  return [config.claudeCommand || 'claude', ...pre, ...usage, ...splitArgs(config.extraArgs), ...(resume ? ['--resume', id] : ['--session-id', id, ...first])];
 }
 
 // claude/codex are usually .cmd shims on Windows; go through cmd.exe so PATHEXT resolution works.
@@ -515,11 +530,19 @@ function startPty(file, fileArgs, { cwd, cols, rows, meta, env = cleanEnv() }) {
   return termId;
 }
 
-ipcMain.handle('pty:spawn', (_e, { agent = 'claude', cwd, sessionId, resume, cols, rows, prompt }) => {
+ipcMain.handle('pty:spawn', (_e, { agent = 'claude', cwd, sessionId, resume, cols, rows, prompt, provider, model, effort }) => {
   const id = sessionId || crypto.randomUUID();
-  const [file, fileArgs] = shellCommand(agentArgv(agent, id, resume, prompt));
+  if (agent === 'codex') ssh.writeCodexRules({ always: true }); // lets crew-ssh out of Codex's sandbox
+  // A custom provider: the one chosen for a new session, or the one a resumed session ran on,
+  // with the model and effort picked in it (kept for the next resume).
+  const bound = resume ? providers.sessionProvider(id) : null;
+  const pid = resume ? bound?.provider : provider;
+  const picks = { model: model || bound?.model, effort: effort || bound?.effort };
+  if (pid) providers.bind(id, pid, picks);
+  const run = providers.launch(pid, picks);
+  const [file, fileArgs] = shellCommand(agentArgv(agent, id, resume, prompt, run?.cli === agent ? run.args : []));
   // Agent sessions get crew-ssh, for the hosts saved in Crew.
-  const env = ssh.sessionEnv(cleanEnv(), id, agent);
+  const env = providers.applyEnv(ssh.sessionEnv(cleanEnv(), id, agent), run?.cli === agent ? run.env : null);
   const termId = startPty(file, fileArgs, { cwd, cols, rows, env, meta: { sessionId: id, agent } });
   return { termId, sessionId: id, startedAt: Date.now() };
 });
@@ -554,7 +577,7 @@ ipcMain.on('pty:resize', (_e, termId, cols, rows) => {
 // A new Codex terminal starts under a temporary id; the renderer reports the real one once known.
 ipcMain.on('pty:rekey', (_e, termId, sessionId) => {
   const p = ptys.get(termId);
-  if (p) p.sessionId = sessionId;
+  if (p) { providers.rebind(p.sessionId, sessionId); p.sessionId = sessionId; }
 });
 ipcMain.on('pty:kill', (_e, termId) => {
   const p = ptys.get(termId);
@@ -652,8 +675,17 @@ function codexDefaults() {
 }
 
 function findCodexFile(id) {
+  return findCodexSession(id)?.file || null;
+}
+
+// A Codex session's file and the home it's in (the user's or a provider's).
+function findCodexSession(id) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  return listFiles(CODEX_SESSIONS, '.jsonl').find((f) => path.basename(f).includes(id)) || null;
+  for (const root of codexRoots()) {
+    const file = listFiles(path.join(root.home, 'sessions'), '.jsonl').find((f) => path.basename(f).includes(id));
+    if (file) return { file, ...root };
+  }
+  return null;
 }
 
 ipcMain.handle('sessions:state', (_e, id, agent) => {
@@ -680,11 +712,13 @@ ipcMain.handle('sessions:state', (_e, id, agent) => {
 
 function findSessionFile(id) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  let dirs = [];
-  try { dirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return null; }
-  for (const d of dirs) {
-    const f = path.join(CLAUDE_DIR, d.name, `${id}.jsonl`);
-    if (fs.existsSync(f)) return f;
+  for (const root of claudeRoots()) {
+    let dirs = [];
+    try { dirs = fs.readdirSync(root.dir, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { continue; }
+    for (const d of dirs) {
+      const f = path.join(root.dir, d.name, `${id}.jsonl`);
+      if (fs.existsSync(f)) return f;
+    }
   }
   return null;
 }
@@ -695,7 +729,8 @@ ipcMain.handle('sessions:rename', (_e, id, title, agent) => {
   const t = String(title || '').trim();
   if (!t || !/^[0-9a-f-]{36}$/i.test(id)) return false;
   if (agent === 'codex') {
-    fs.appendFileSync(CODEX_INDEX, `${JSON.stringify({ id, thread_name: t, updated_at: new Date().toISOString() })}\n`);
+    const home = findCodexSession(id)?.home || CODEX_HOME; // a provider's session: its own index
+    fs.appendFileSync(path.join(home, 'session_index.jsonl'), `${JSON.stringify({ id, thread_name: t, updated_at: new Date().toISOString() })}\n`);
     return true;
   }
   const file = findSessionFile(id);
@@ -704,11 +739,11 @@ ipcMain.handle('sessions:rename', (_e, id, title, agent) => {
   return true;
 });
 
-function runCommand(argv) {
+function runCommand(argv, env = cleanEnv()) {
   return new Promise((resolve) => {
     const [file, args] = shellCommand(argv);
     let output = '';
-    const child = spawn(file, args, { env: cleanEnv(), windowsHide: true, windowsVerbatimArguments: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { env, windowsHide: true, windowsVerbatimArguments: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', (d) => { output += d; });
     child.stderr.on('data', (d) => { output += d; });
     child.on('error', (e) => resolve({ code: -1, output: e.message }));
@@ -744,11 +779,14 @@ ipcMain.handle('sessions:delete', async (_e, id, title, agent) => {
   if (r.response !== 0) return false;
   const wasRunning = stopSession(id);
   if (codex) {
+    // A provider's session is in the provider's own Codex home.
+    const root = findCodexSession(id);
+    const env = root?.provider ? { ...cleanEnv(), CODEX_HOME: root.home } : cleanEnv();
     // A Codex that was just stopped can hold the session for a moment while it exits.
     let res;
     for (let attempt = 0; attempt < 4; attempt++) {
       if (wasRunning || attempt > 0) await new Promise((r) => setTimeout(r, 1000));
-      res = await runCommand([config.codexCommand || 'codex', 'delete', '--force', id]);
+      res = await runCommand([config.codexCommand || 'codex', 'delete', '--force', id], env);
       if (res.code === 0) break;
     }
     if (res.code !== 0) {
@@ -1218,7 +1256,8 @@ app.whenReady().then(() => {
   createWindow();
   ssh.init(() => win);
   agents.init({
-    getWin: () => win, cleanEnv, sessionEnv: ssh.sessionEnv, shellCommand, getConfig: () => config,
+    getWin: () => win, cleanEnv, sessionEnv: ssh.sessionEnv, shellCommand, getConfig: () => config, writeCodexRules: ssh.writeCodexRules,
+    providerLaunch: providers.launch, applyEnv: providers.applyEnv, hasProvider: providers.has,
     onRunDone: () => refreshUsage('claude', true).then(() => refreshUsage('codex', true)), // runs spend quota
   });
   ssh.registerOps(agents.ops);

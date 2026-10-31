@@ -53,6 +53,14 @@ contextBridge.exposeInMainWorld('api', {
 
   egoStatus: () => ipcRenderer.invoke('ego:status'),
 
+  listProviders: () => ipcRenderer.invoke('providers:list'),
+  saveProvider: (p) => ipcRenderer.invoke('providers:save', p),
+  deleteProvider: (id) => ipcRenderer.invoke('providers:delete', id),
+  fetchProviderModels: (q) => ipcRenderer.invoke('providers:fetch-models', q),
+  pickProviderIcon: () => ipcRenderer.invoke('providers:pick-icon'),
+  providerBindings: () => ipcRenderer.invoke('providers:bindings'),
+  bindProvider: (sessionId, providerId, picks) => ipcRenderer.invoke('providers:bind', sessionId, providerId, picks),
+
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
 

@@ -37,7 +37,7 @@ function renderAgents() {
   }
   agentListEl.replaceChildren(...[...agentsList].sort((a, b) => a.name.localeCompare(b.name)).map((a) => el('div', {
     class: 'row-item agent-row',
-    title: `@${a.name} · ${AGENTS[a.cli].label}${a.model ? ` (${a.model})` : ''} · ${AGENT_ACCESS[a.access]}${a.instructions ? `\n\n${a.instructions}` : ''}`,
+    title: `@${a.name} · ${runnerInfo(a.cli).label}${a.model ? ` (${a.model})` : ''} · ${AGENT_ACCESS[a.access]}${a.instructions ? `\n\n${a.instructions}` : ''}`,
     onclick: () => editAgent(a),
     oncontextmenu: (e) => {
       e.preventDefault();
@@ -48,9 +48,19 @@ function renderAgents() {
       ]);
     },
   },
-  el('span', { class: 'agent-icon', html: AGENTS[a.cli].badge }),
+  runnerInfo(a.cli).icon(),
   el('span', { class: 'label' }, a.name),
   el('span', { class: 'meta' }, { read: 'reads', edit: 'edits', full: 'full access' }[a.access]))));
+}
+
+// What an agent runs on: Claude, Codex or a custom provider (Crew's own agent), with its icon.
+function runnerInfo(cli) {
+  if (String(cli || '').startsWith('provider:')) {
+    const p = state.providers.find((x) => x.id === cli.slice(9));
+    return { label: p?.name || cli.slice(9), icon: () => el('span', { class: 'agent-icon' }, p ? providerIcon(p) : null), provider: p || null };
+  }
+  const a = AGENTS[cli] || AGENTS.claude;
+  return { label: a.label, icon: () => el('span', { class: 'agent-icon', html: a.badge }), provider: null };
 }
 
 function addAgentMenu(e) {
@@ -80,8 +90,11 @@ function editAgent(a, template = null) {
   a = a || { ...template, id: undefined };
   const card = agentModal.firstElementChild;
   const name = textInput(a.name, { placeholder: 'e.g. CodeReviewerAgent (no spaces)' });
-  const cli = el('select', {}, el('option', { value: 'claude' }, 'Claude Code'), el('option', { value: 'codex' }, 'Codex'));
+  const cli = el('select', {}, el('option', { value: 'claude' }, 'Claude Code'), el('option', { value: 'codex' }, 'Codex'),
+    ...state.providers.map((p) => el('option', { value: `provider:${p.id}` }, p.name)));
   cli.value = a.cli || 'claude';
+  if (!cli.value) cli.value = 'claude'; // its provider was deleted
+  const providerOfCli = () => runnerInfo(cli.value).provider;
   const cliHint = el('span', { class: 'field-hint' });
   const model = el('select', {});
   const modelHint = el('span', { class: 'field-hint' });
@@ -97,7 +110,10 @@ function editAgent(a, template = null) {
   function syncEfforts() {
     let levels = CLAUDE_EFFORTS;
     let defaultLabel = 'Default (your Claude Code setting)';
-    if (cli.value === 'codex') {
+    if (providerOfCli()) {
+      levels = ['low', 'medium', 'high', 'xhigh'];
+      defaultLabel = 'Default (the model\'s)';
+    } else if (cli.value === 'codex') {
       const m = modelList.find((x) => x.value === model.value) || modelList.find((x) => x.isDefault);
       levels = m?.efforts?.length ? m.efforts : ['low', 'medium', 'high', 'xhigh'];
       defaultLabel = m?.defaultEffort ? `Default (${effortLabel(m.defaultEffort)})` : 'Default (the model\'s)';
@@ -111,9 +127,11 @@ function editAgent(a, template = null) {
   // Which CLIs are installed: one that isn't says so, with how to install it.
   const syncCli = () => {
     for (const o of cli.options) {
+      if (o.value.startsWith('provider:')) continue;
       const info = installed[o.value];
       o.textContent = `${AGENTS[o.value].label === 'Claude' ? 'Claude Code' : 'Codex'}${info && !info.installed ? ' (not installed)' : ''}`;
     }
+    if (providerOfCli()) { cliHint.textContent = providerOfCli().protocol === 'anthropic' ? 'A custom model provider, run on Claude Code' : 'A custom model provider, run on Codex'; cliHint.classList.remove('danger'); saveBtn.disabled = false; return; }
     const info = installed[cli.value];
     cliHint.textContent = !info ? 'Checking…' : info.installed ? 'Installed' : `Not installed. Install it with: ${info.installCommand}`;
     cliHint.classList.toggle('danger', !!info && !info.installed);
@@ -128,6 +146,12 @@ function editAgent(a, template = null) {
     const seq = ++modelSeq;
     const which = cli.value;
     const option = (value, label) => el('option', { value }, label);
+    const prov = providerOfCli();
+    if (prov) {
+      fillModels(prov.models.map((m) => ({ value: m.id, label: m.name || m.id })), `Default (${prov.models.find((m) => m.id === prov.defaultModel)?.name || prov.defaultModel || 'none set'})`);
+      modelHint.textContent = prov.models.length ? '' : 'Add models to this provider in Settings → Model providers.';
+      return;
+    }
     if (which === 'claude') {
       const list = Object.entries(CLAUDE_ALIASES).map(([value, label]) => ({ value, label }));
       fillModels(list, 'Default (your Claude Code model)');
@@ -163,7 +187,7 @@ function editAgent(a, template = null) {
   const warn = el('div', { class: 'field-hint agent-warn' });
   const syncWarn = () => {
     warn.textContent = access.value === 'full' ? 'It runs any command and changes anything without asking you, including outside the project. Give this only to agents you trust with that, like a publisher.'
-      : access.value === 'edit' ? (cli.value === 'codex' ? 'Codex\'s sandbox keeps it to the project folder.' : 'Claude\'s auto mode lets it act, and blocks risky actions.')
+      : access.value === 'edit' ? ((providerOfCli() ? providerOfCli().protocol !== 'anthropic' : cli.value === 'codex') ? 'Codex\'s sandbox keeps it to the project folder.' : 'Claude\'s auto mode lets it act, and blocks risky actions.')
         : 'It can look but not change anything.';
     warn.classList.toggle('danger', access.value === 'full');
   };
@@ -226,7 +250,7 @@ function renderRunCard(r) {
   card.className = `run-card ${r.status}`;
   card.replaceChildren(...[
     el('div', { class: 'run-head' },
-      el('span', { class: 'agent-icon', html: AGENTS[r.cli].badge }),
+      runnerInfo(r.cli).icon(),
       el('b', {}, r.agent),
       el('span', { class: 'run-state' }, r.status === 'running' ? el('span', { class: 'spinner' }) : null, ` ${{ running: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[r.status]} · `, el('span', { class: 'run-time' }, runElapsed(r))),
       el('button', { class: 'icon-btn small run-x', title: 'Dismiss', html: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>', onclick: () => dismissRun(r.id) })),
@@ -284,7 +308,7 @@ function updateMentions() {
   mentionPop.replaceChildren(...matches.map((a, i) => el('div', {
     class: `mention-item${i === mentionState.index ? ' on' : ''}`,
     onmousedown: (e) => { e.preventDefault(); pickMention(i); },
-  }, el('span', { class: 'agent-icon', html: AGENTS[a.cli].badge }), el('b', {}, `@${a.name}`), el('span', { class: 'muted' }, ` · ${AGENTS[a.cli].label} · ${{ read: 'reads', edit: 'edits', full: 'full access' }[a.access]}`))));
+  }, runnerInfo(a.cli).icon(), el('b', {}, `@${a.name}`), el('span', { class: 'muted' }, ` · ${runnerInfo(a.cli).label} · ${{ read: 'reads', edit: 'edits', full: 'full access' }[a.access]}`))));
   mentionPop.classList.remove('hidden');
 }
 

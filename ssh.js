@@ -69,17 +69,18 @@ function writeWorkspace(h) {
   const addr = `${h.user ? `${h.user}@` : ''}${h.host}${h.port && h.port !== 22 ? `:${h.port}` : ''}`;
   const text = `# Remote host: ${h.name}
 
-You're in Crew's workspace for the remote machine **${h.name}** (${addr}). The user's terminal on it is open beside this chat. Work on that machine, not in this folder.
+You're in Crew's workspace for the remote machine **${h.name}** (${addr}). The user's terminal on it is open beside this chat, and you share it with them. Work on that machine, not in this folder.
 
-- Run commands on it: \`crew-ssh exec ${h.name} -- <command>\` (add \`--cwd DIR\` to run in a folder there).
-- See what's on the user's terminal there: \`crew-ssh screen ${h.name}\`, e.g. when they say "look at this error".
+- Read the shared terminal: \`crew-ssh screen ${h.name}\` (\`--lines N\`; \`--wait S\` first waits up to S seconds for new output to come and go quiet). Read it when the user refers to something on their screen ("look at this error").
+- Type into the shared terminal: \`crew-ssh send ${h.name} --keys enter "<command>"\`. It types the text, presses the keys (\`enter\`, \`ctrl+c\`, \`tab\`, \`up\`, \`esc\`, \`q\`, …), waits until the output is quiet for a second (\`--wait S\`, default 10) and prints what appeared. The user sees it happen. Use it for interactive work: answering a prompt (\`--keys y,enter\`), REPLs, \`top\`, editors, long-running commands to watch, stopping something (\`--keys ctrl+c\`), or continuing where the user is (same directory, environment, \`sudo -s\` shell).
+- Run a command on its own: \`crew-ssh exec ${h.name} "<command>"\` (add \`--cwd DIR\` before the command). It has no terminal and no input, so use non-interactive forms (\`--no-pager\`, \`-y\`, \`DEBIAN_FRONTEND=noninteractive\`) and keep output short (\`| tail -n 100\`). It's best for checks whose full output you need, and doesn't disturb the user's terminal.
 - Copy files: \`crew-ssh cp <local> ${h.name}:<remote>\` or \`crew-ssh cp ${h.name}:<remote> <local>\`.
 
-Crew holds the credentials: never ask for passwords or keys, and don't use \`ssh\`, \`scp\` or \`sftp\` directly.
+Put the command or text in one quoted argument after the options, with no \`--\` before it (Codex runs a line with a bare \`--\` in its sandbox, where crew-ssh can't reach Crew). A quiet second doesn't mean a command finished: for more, read with \`crew-ssh screen ${h.name} --wait 30\`. Before typing, read the screen if you're unsure what's on it (the user may be typing, or a program may be open). Don't type over a line the user is writing.
 
-Commands that only read run at once. Anything that may change the machine waits until the user approves it in Crew: say in one line what you'll run and why, and give crew-ssh a long timeout (10 minutes). If the user denies something, don't run it again or work around it; ask.
+Crew holds the credentials: never ask for passwords or keys, and don't use \`ssh\`, \`scp\` or \`sftp\` directly. When the terminal asks for a password, a passphrase or a code (e.g. after \`sudo\`), Crew won't let you type it: ask the user to type it in the terminal, then continue with \`crew-ssh screen ${h.name} --wait 10\`.
 
-crew-ssh commands have no terminal and no input: use non-interactive forms (\`--no-pager\`, \`-y\`, \`DEBIAN_FRONTEND=noninteractive\`) and keep output short (\`| tail -n 100\`). When a step needs typing (a sudo password, an editor, a confirmation), ask the user to do it in their terminal beside you, then check the result with \`crew-ssh screen ${h.name}\`.
+What only reads runs at once. Anything that may change the machine, typed or run, waits until the user approves it in Crew: say in one line what you'll do and why, and give crew-ssh a long timeout (10 minutes). If the user denies something, don't do it again or work around it; ask.
 
 ## The user's notes about ${h.name}
 
@@ -338,8 +339,9 @@ function copyFile(h, direction, local, remote) {
 // ---------- terminals on a host ----------
 
 // The user's terminal on a host is an SSH shell with a PTY, shown in a Crew pane. A headless
-// xterm mirrors it, so an agent can read what's on screen (crew-ssh screen <host>).
-const shells = new Map(); // host id -> Set of { stream, mirror }
+// xterm mirrors it, so an agent can read what's on screen (crew-ssh screen <host>) and type into
+// it (crew-ssh send <host>), sharing the terminal with the user as in Hatoba.
+const shells = new Map(); // host id -> Set of { stream, mirror, lastOut }
 
 function openShell(hostId, cols, rows, onData, onClose) {
   const found = findHost(hostId);
@@ -352,12 +354,12 @@ function openShell(hostId, cols, rows, onData, onClose) {
       const { StringDecoder } = require('string_decoder');
       const mirror = new Terminal({ cols, rows, scrollback: 2000, allowProposedApi: true });
       const decoder = new StringDecoder('utf8'); // a character can be split across chunks
-      const rec = { stream, mirror };
+      const rec = { stream, mirror, lastOut: 0 };
       if (!shells.has(h.id)) shells.set(h.id, new Set());
       shells.get(h.id).add(rec);
       hold(h.id, 1);
       notifyHosts();
-      const out = (d) => { const t = decoder.write(d); if (t) { mirror.write(t); onData(t); } };
+      const out = (d) => { const t = decoder.write(d); if (t) { rec.lastOut = Date.now(); mirror.write(t); onData(t); } };
       stream.on('data', out);
       stream.stderr?.on('data', out);
       let code = 0;
@@ -378,16 +380,122 @@ function openShell(hostId, cols, rows, onData, onClose) {
   }));
 }
 
-// The last `count` lines of the most recently opened terminal on the host, as plain text.
-function screenText(h, count = 60) {
+// The host's most recently opened terminal: the one agents read and type into.
+function terminalOf(h) {
   const recs = [...(shells.get(h.id) || [])];
-  const rec = recs[recs.length - 1];
-  if (!rec) return null;
+  return recs[recs.length - 1] || null;
+}
+
+// The mirror parses writes asynchronously; this resolves once everything received is on it.
+const settled = (rec) => new Promise((resolve) => rec.mirror.write('', resolve));
+
+// Lines of the terminal from absolute row `from` (screen and scrollback), soft-wrapped lines joined.
+function linesFrom(rec, from = 0) {
   const b = rec.mirror.buffer.active;
   const lines = [];
-  for (let i = 0; i < b.length; i++) lines.push(b.getLine(i)?.translateToString(true) || '');
+  for (let i = Math.max(0, from); i < b.length; i++) {
+    const line = b.getLine(i);
+    const text = line?.translateToString(true) || '';
+    if (line?.isWrapped && lines.length) lines[lines.length - 1] += text;
+    else lines.push(text);
+  }
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
-  return lines.slice(-count).join('\n');
+  return lines;
+}
+
+const altScreen = (rec) => rec.mirror.buffer.active.type === 'alternate';
+
+// The last `count` lines of the host's terminal, as plain text.
+function screenText(h, count = 60) {
+  const rec = terminalOf(h);
+  if (!rec) return null;
+  return linesFrom(rec).slice(-count).join('\n');
+}
+
+// Waits until the terminal's output has been quiet for a second after `since`, or `ms` passed.
+// Says which: 'quiet' (new output that went quiet), 'none' (no new output) or 'busy' (still going).
+async function waitQuiet(rec, since, ms, abort) {
+  const end = Date.now() + ms;
+  while (!abort?.aborted) {
+    const now = Date.now();
+    const got = rec.lastOut > since;
+    if (got && now - rec.lastOut >= 1000) return 'quiet';
+    if (now >= end) return got ? 'busy' : 'none';
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return 'none';
+}
+
+// Keys an agent can press, by name, as xterm sends them. Arrows, Home and End follow the
+// terminal's application cursor mode (set by full-screen programs).
+function keySequence(name, appCursor) {
+  const k = String(name).trim().toLowerCase();
+  const csi = (c) => (appCursor ? `\x1bO${c}` : `\x1b[${c}`);
+  const named = {
+    enter: '\r', return: '\r', tab: '\t', 'shift+tab': '\x1b[Z', esc: '\x1b', escape: '\x1b', backspace: '\x7f', space: ' ',
+    up: csi('A'), down: csi('B'), right: csi('C'), left: csi('D'), home: csi('H'), end: csi('F'),
+    page_up: '\x1b[5~', page_down: '\x1b[6~', insert: '\x1b[2~', delete: '\x1b[3~',
+    f1: '\x1bOP', f2: '\x1bOQ', f3: '\x1bOR', f4: '\x1bOS', f5: '\x1b[15~', f6: '\x1b[17~', f7: '\x1b[18~', f8: '\x1b[19~',
+    f9: '\x1b[20~', f10: '\x1b[21~', f11: '\x1b[23~', f12: '\x1b[24~',
+  };
+  if (named[k]) return named[k];
+  let m = /^ctrl\+([a-z])$/.exec(k);
+  if (m) return String.fromCharCode(m[1].charCodeAt(0) - 96);
+  m = /^alt\+(.)$/.exec(String(name).trim());
+  if (m) return `\x1b${m[1]}`;
+  if ([...String(name)].length === 1) return String(name); // one printable character
+  return null;
+}
+
+const badKey = (keys) => {
+  const k = keys.find((x) => keySequence(x, false) == null);
+  return k == null ? null : `Unknown key "${k}". Use one printable character or: enter, tab, shift+tab, esc, backspace, space, up, down, left, right, home, end, page_up, page_down, insert, delete, f1-f12, ctrl+a-ctrl+z, alt+<char>.`;
+};
+
+// Keys that submit the line typed so far.
+const SUBMIT_KEYS = new Set(['enter', 'return', 'ctrl+m', 'ctrl+j', 'ctrl+o']);
+
+// A prompt for a secret on the cursor's line: the user types those, never an agent.
+const asksSecret = (rec) => {
+  const b = rec.mirror.buffer.active;
+  const line = b.getLine(b.baseY + b.cursorY)?.translateToString(true) || '';
+  return /(password|passphrase|passcode|密码|口令|verification code|otp)[^\n]*[:：]\s*$/i.test(line.trim());
+};
+
+// How the input reads in an approval card and the activity log: the text, then the keys.
+const describeInput = (text, keys) => [text ? text.replace(/\r\n?|\n/g, '⏎') : '', ...keys.map((k) => `[${k}]`)].filter(Boolean).join(' ');
+
+// Whether input runs without asking in the default mode: keys that don't submit anything at a
+// shell prompt, or a submitted line that only reads (the same rule as crew-ssh exec). Full-screen
+// programs (editors, pagers, menus) and everything else ask.
+function inputOnlyReads(rec, text, keys) {
+  const names = keys.map((k) => String(k).trim().toLowerCase());
+  if (altScreen(rec)) return false;
+  if (!/[\r\n]/.test(text) && !names.some((k) => SUBMIT_KEYS.has(k))) return !names.includes('ctrl+d'); // Ctrl+D can log out
+  if (names.some((k) => !SUBMIT_KEYS.has(k))) return false; // editing keys before Enter: ask
+  // The line that runs is what's already typed after the prompt plus the text. If the prompt
+  // can't be told apart, the whole line is checked, which then asks.
+  const b = rec.mirror.buffer.active;
+  const typed = (b.getLine(b.baseY + b.cursorY)?.translateToString(true) || '').replace(/^.*?[$#%>❯]\s/, '');
+  const line = `${typed}${text}`.replace(/[\r\n]+$/, '');
+  return !/[\r\n]/.test(line) && onlyReads(line);
+}
+
+// Types into the user's terminal on the host, then waits for the output to settle and returns
+// what appeared after the input (the whole screen while a full-screen program is showing).
+async function sendInput(rec, text, keys, waitMs, abort) {
+  const seqs = keys.map((k) => keySequence(k, rec.mirror.modes.applicationCursorKeysMode));
+  await settled(rec);
+  const start = rec.mirror.registerMarker(0); // the cursor's line; follows it as the scrollback trims
+  const sentAt = Date.now();
+  if (text) rec.stream.write(text.replace(/\r?\n/g, '\r'));
+  for (const s of seqs) { await new Promise((r) => setTimeout(r, 30)); rec.stream.write(s); }
+  const state = await waitQuiet(rec, sentAt, waitMs, abort);
+  await settled(rec);
+  const b = rec.mirror.buffer.active;
+  const lines = altScreen(rec) ? linesFrom(rec, b.baseY) : linesFrom(rec, start && !start.isDisposed ? start.line : 0);
+  start?.dispose();
+  return { state, output: lines.slice(-400).join('\n') };
 }
 
 // ---------- which commands only read ----------
@@ -449,7 +557,7 @@ function logActivity(h, { kind, command, cwd, session, agent, decision, code, er
 // Resolves to 'auto' | 'approved' (ran without or with the user) or null when denied.
 async function approve(h, req, waiting) {
   const mode = h.approval || 'changes';
-  const reads = req.kind === 'exec' ? onlyReads(req.command) : req.kind === 'download';
+  const reads = req.reads ?? (req.kind === 'exec' ? onlyReads(req.command) : req.kind === 'download');
   if (mode === 'auto' || (allowedUntil.get(h.id) || 0) > Date.now() || (mode === 'changes' && reads)) return 'auto';
   waiting('waiting for you to approve it in Crew');
   const p = ask('approve', { hostId: h.id, host: label(h), action: req.kind, command: req.command, cwd: req.cwd || '', session: req.session, agent: req.agent });
@@ -507,10 +615,48 @@ function handleClient(sock) {
       if (found.error) { fail(found.error); return; }
       const h = found.host;
       const waiting = (text) => send({ type: 'status', message: text });
+      const noTerminal = `No terminal on ${h.name} is open in Crew. Use crew-ssh exec to run commands, or ask the user to open the host's terminal.`;
+      const out = (text) => send({ type: 'out', d: Buffer.from(text).toString('base64') });
+      const note = (text) => send({ type: 'err', d: Buffer.from(`crew-ssh: ${text}\n`).toString('base64') });
       if (m.op === 'screen') {
-        const text = screenText(h, Math.min(500, Math.max(1, +m.lines || 60)));
-        if (text == null) { fail(`No terminal on ${h.name} is open in Crew. Use crew-ssh exec to run commands instead.`); return; }
-        send({ type: 'out', d: Buffer.from(`${text}\n`).toString('base64') });
+        const rec = terminalOf(h);
+        if (!rec) { fail(noTerminal); return; }
+        const wait = Math.min(120, Math.max(0, +m.wait || 0)) * 1000;
+        const state = wait ? await waitQuiet(rec, Date.now(), wait, abort) : null;
+        if (abort.aborted) return;
+        await settled(rec);
+        out(`${linesFrom(rec).slice(-Math.min(1000, Math.max(1, +m.lines || 60))).join('\n')}\n`);
+        if (state) note({ quiet: 'new output came and went quiet', none: 'no new output', busy: 'output never went quiet: something may still be running' }[state]);
+        if (altScreen(rec)) note('a full-screen program is showing');
+        send({ type: 'exit', code: 0 });
+        sock.end();
+        return;
+      }
+      if (m.op === 'send') {
+        const rec = terminalOf(h);
+        if (!rec) { fail(noTerminal); return; }
+        const text = String(m.text || '');
+        const keys = Array.isArray(m.keys) ? m.keys.map(String).filter((k) => k.trim()) : [];
+        if (!text && !keys.length) { fail('Nothing to send: give text, --keys, or both. To read more output, use crew-ssh screen <host> --wait N.'); return; }
+        if (badKey(keys)) { fail(badKey(keys)); return; }
+        await settled(rec);
+        if (asksSecret(rec)) { fail('The terminal is asking for a password or code. The user types those: ask them to, then read the result with crew-ssh screen.'); return; }
+        req = { kind: 'input', command: describeInput(text, keys), session: m.session || '', agent: m.agent || '', reads: inputOnlyReads(rec, text, keys) };
+        const decision = await approve(h, req, waiting);
+        if (abort.aborted) return;
+        if (!decision) { logActivity(h, { ...req, decision: 'denied' }); fail('The user denied this input in Crew. Ask them before trying again.'); return; }
+        if (!terminalOf(h)) { fail(noTerminal); return; } // closed while waiting
+        let result;
+        try {
+          result = await sendInput(rec, text, keys, Math.min(120, Math.max(1, +m.wait || 10)) * 1000, abort);
+        } catch (e) {
+          logActivity(h, { ...req, decision, error: e.message });
+          fail(e.message);
+          return;
+        }
+        logActivity(h, { ...req, decision, code: 0 });
+        out(`${result.output}\n`);
+        if (result.state !== 'quiet') note(result.state === 'none' ? 'no output yet' : 'output is still coming: read more with crew-ssh screen <host> --wait N');
         send({ type: 'exit', code: 0 });
         sock.end();
         return;
@@ -615,7 +761,7 @@ function sessionEnv(env, sessionId, agent) {
 // The skill that tells Claude Code and Codex how to use crew-ssh.
 const SKILL = `---
 name: crew-ssh
-description: Run commands on, and copy files to or from, the user's saved SSH hosts (servers, VPSes, other machines) through Crew. Use whenever the user asks to check, manage, deploy to, debug or change a remote machine.
+description: Run commands on, type into the user's terminal on, and copy files to or from, the user's saved SSH hosts (servers, VPSes, other machines) through Crew. Use whenever the user asks to check, manage, deploy to, debug or change a remote machine.
 ---
 
 # Remote hosts through Crew
@@ -623,9 +769,16 @@ description: Run commands on, and copy files to or from, the user's saved SSH ho
 The user keeps their SSH hosts and credentials in Crew. Reach them only with the \`crew-ssh\` command: never ask for, read or handle passwords or keys, and don't fall back to \`ssh\`, \`scp\` or \`sftp\`.
 
 - \`crew-ssh hosts --json\` lists the saved hosts: name, address, user, group, \`notes\` and \`approval\`.
-- \`crew-ssh exec <host> [--cwd DIR] -- <command>\` runs a command on the host with its login shell and prints its output. It exits with the command's exit status, or 255 when Crew couldn't run it (the reason starts with \`crew-ssh:\`).
+- \`crew-ssh exec <host> [--cwd DIR] "<command>"\` runs a command on the host with its login shell and prints its output. It exits with the command's exit status, or 255 when Crew couldn't run it (the reason starts with \`crew-ssh:\`).
 - \`crew-ssh cp <local> <host>:<remote>\` uploads one file; \`crew-ssh cp <host>:<remote> <local>\` downloads one.
-- \`crew-ssh screen <host>\` prints what's on the user's terminal on that host in Crew (read it when they refer to something on their screen).
+- \`crew-ssh screen <host> [--lines N] [--wait S]\` prints what's on the user's terminal on that host in Crew (read it when they refer to something on their screen). \`--wait\` first waits up to S seconds for new output to come and go quiet.
+- \`crew-ssh send <host> [--keys K1,K2] [--wait S] ["<text>"]\` types into that terminal, which the user shares with you and watches: the text, then the keys (\`enter\`, \`tab\`, \`esc\`, \`ctrl+c\`, \`up\`, \`y\`, …). It waits until the output is quiet for a second (at most S seconds, default 10) and prints what appeared. Example: \`crew-ssh send web1 --keys enter "sudo systemctl restart nginx"\`.
+
+Put the command or text in one quoted argument after the options, with no \`--\` before it. Codex can't match its rules on a command line with a bare \`--\`, and then runs crew-ssh in its sandbox, where it can't reach Crew.
+
+## exec or the shared terminal
+
+Use \`exec\` for self-contained commands whose output you need; it doesn't touch the user's terminal. Use \`send\` when the work is interactive or belongs in the user's terminal: answering prompts, REPLs, editors, \`top\`, watching a long command, stopping one with \`ctrl+c\`, or continuing in the shell the user is in (its directory, environment, a \`sudo -s\` shell). \`send\` works only while the host's terminal is open in Crew. Read the screen first when you're unsure what's on it, and don't type over a line the user is writing. A quiet second doesn't mean a command finished: read more with \`screen --wait\`. When the terminal asks for a password, passphrase or code, Crew won't type it for you: ask the user to type it, then continue.
 
 ## Choosing a host
 
@@ -635,11 +788,11 @@ If the machine isn't saved in Crew, say so and ask the user to add it (Hosts in 
 
 ## Approval
 
-Commands that only read (\`df -h\`, \`systemctl status nginx\`, \`journalctl -u app -n 200 --no-pager\`, \`docker ps\` …) run at once. Anything that may change something, and every upload, waits until the user approves it in Crew. Before such a command, say in one line what you'll run and why. Give \`crew-ssh\` a long timeout (10 minutes) so the user has time to approve, or to answer a password or host-key prompt on a first connection. If the user denies a command, don't run it again or work around it; ask them.
+Commands that only read (\`df -h\`, \`systemctl status nginx\`, \`journalctl -u app -n 200 --no-pager\`, \`docker ps\` …), run or typed at the shell prompt, run at once. Anything that may change something, input into a full-screen program, and every upload, waits until the user approves it in Crew. Before such a command, say in one line what you'll run and why. Give \`crew-ssh\` a long timeout (10 minutes) so the user has time to approve, or to answer a password or host-key prompt on a first connection. If the user denies a command, don't run it again or work around it; ask them.
 
 ## Commands
 
-There's no terminal and no input: use non-interactive forms (\`--no-pager\`, \`-y\`, \`DEBIAN_FRONTEND=noninteractive\`, \`systemctl --no-pager\`). Keep output short (\`| tail -n 100\`). If \`sudo\` needs a password, ask the user to run that step. After a timeout or a \`crew-ssh:\` error, check what the command already did before running it again.
+\`exec\` has no terminal and no input: use non-interactive forms (\`--no-pager\`, \`-y\`, \`DEBIAN_FRONTEND=noninteractive\`, \`systemctl --no-pager\`). Keep output short (\`| tail -n 100\`). If \`sudo\` needs a password, ask the user to run that step. After a timeout or a \`crew-ssh:\` error, check what the command already did before running it again.
 
 If \`crew-ssh\` isn't found or can't reach Crew, the session wasn't started from Crew or Crew isn't running: tell the user.
 `;
@@ -654,6 +807,42 @@ function installSkill() {
     try { fs.mkdirSync(path.dirname(t), { recursive: true }); fs.writeFileSync(t, SKILL); done.push(t); } catch { /* report the others */ }
   }
   return done;
+}
+
+// A skill an earlier Crew installed is brought up to date with this one (only Crew's own file).
+function refreshSkill() {
+  for (const t of [
+    path.join(os.homedir(), '.claude', 'skills', 'crew-ssh', 'SKILL.md'),
+    path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'skills', 'crew-ssh', 'SKILL.md'),
+  ]) {
+    try {
+      const old = fs.readFileSync(t, 'utf8');
+      if (old !== SKILL && old.includes('# Remote hosts through Crew')) fs.writeFileSync(t, SKILL);
+    } catch { /* not installed */ }
+  }
+}
+
+// Codex runs commands in its sandbox, whose restricted user can't open Crew's private pipe, so
+// crew-ssh and crew fail there with "can't reach Crew". Codex's own rules let trusted commands run
+// outside the sandbox; Crew keeps a rules file with just its two commands. Crew still asks the
+// user before anything that changes a host.
+const CODEX_RULES = `# Written by Crew: its crew-ssh and crew commands talk to Crew over a private pipe, which
+# Codex's sandbox can't open. Crew asks you before anything that changes a host.
+prefix_rule(pattern=[["crew-ssh", "crew-ssh.cmd"]], decision="allow")
+prefix_rule(pattern=[["crew", "crew.cmd"]], decision="allow")
+`;
+
+// At startup when Codex is set up, and before every Codex session or agent run (Codex may have been
+// installed since Crew started), so it works on any computer Crew is installed on.
+function writeCodexRules({ always = false } = {}) {
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  if (!always && !fs.existsSync(codexHome)) return; // Codex isn't set up here (yet)
+  const target = path.join(codexHome, 'rules', 'crew.rules');
+  try {
+    if (fs.existsSync(target) && fs.readFileSync(target, 'utf8') === CODEX_RULES) return;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, CODEX_RULES);
+  } catch { /* Codex sessions then can't use crew-ssh */ }
 }
 
 // ---------- window side ----------
@@ -744,6 +933,8 @@ function init(windowGetter) {
   getWin = windowGetter;
   getWin()?.webContents.on('did-start-loading', dropPrompts);
   installCli();
+  refreshSkill();
+  writeCodexRules();
   startBridge();
 }
 
@@ -751,4 +942,4 @@ function shutdown() {
   for (const id of [...pool.keys()]) dropConn(id);
 }
 
-module.exports = { init, shutdown, sessionEnv, openShell, registerOps, onlyReads, parseSshConfig };
+module.exports = { init, shutdown, sessionEnv, openShell, registerOps, onlyReads, parseSshConfig, writeCodexRules };
