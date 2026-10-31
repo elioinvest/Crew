@@ -1542,8 +1542,18 @@ function scheduleScreenRead(entry) {
 
 function renderComposer() {
   const entry = state.terms.get(state.active);
-  composerEl.classList.toggle('hidden', !entry || entry.agent === 'ssh' || entry.agent === 'file');
-  if (!entry || entry.agent === 'ssh' || entry.agent === 'file') return;
+  composerEl.classList.toggle('hidden', !entry || entry.agent === 'file');
+  if (!entry || entry.agent === 'file') return;
+  // A host's terminal: the box is its command line, without the agents' chips.
+  composerEl.classList.toggle('shell', entry.agent === 'ssh');
+  if (entry.agent === 'ssh') {
+    const h = hostOfSession(state.active); // hosts.js
+    inputEl.placeholder = `Type a command for ${h?.name || 'the server'}`;
+    $('#chip-project').textContent = h ? `${h.name} ▾` : '';
+    $('#composer-hint').textContent = entry.exited ? 'Disconnected — press Enter to reconnect' : '';
+    $('#composer-send').disabled = !canSend();
+    return;
+  }
   const s = currentSettings(entry);
   const codex = entry.agent === 'codex';
   const prov = providerOf(state.active);
@@ -1609,6 +1619,21 @@ function sendCommand(entry, cmd) {
   });
 }
 
+// The prompt box as a host terminal's command line: each line typed, then Enter.
+async function shellSubmit(entry, value) {
+  if (entry.exited) { respawn(state.active); return; }
+  if (!entry.termId || !value.trim()) return;
+  inputEl.value = '';
+  entry.draft = '';
+  autosizeInput();
+  const lines = value.replace(/\r\n?/g, '\n').split('\n');
+  while (lines.length > 1 && !lines[lines.length - 1].trim()) lines.pop();
+  for (const line of lines) {
+    api.write(entry.termId, `${line}\r`);
+    if (lines.length > 1) await sleep(120); // let the shell take each line
+  }
+}
+
 function canSend() {
   return !!inputEl.value.trim() || !!activeEntry()?.attachments.length;
 }
@@ -1620,6 +1645,7 @@ async function submitComposer() {
   const text = inputEl.value.trim();
   const files = entry ? entry.attachments.slice() : [];
   if (!entry || (!text && !files.length)) return;
+  if (entry.agent === 'ssh') { shellSubmit(entry, inputEl.value); return; } // a host's terminal
   if (entry.exited) {
     await respawn(state.active, isOnDisk(state.active));
     return; // keep the draft; it can be sent once the session is back up

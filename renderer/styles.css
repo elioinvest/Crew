@@ -1149,3 +1149,7 @@ body.git-open #btn-git { color: var(--text); background: var(--active); }
 .files-layer .fl::before { content: attr(data-n); position: absolute; left: calc(-1 * var(--gutter)); width: calc(var(--gutter) - 14px); text-align: right; color: var(--muted); user-select: none; }
 .files-layer::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--gutter) - 6px); border-left: 1px solid var(--border); pointer-events: none; }
 .files-input { overflow: hidden; }
+
+/* The prompt box as a host terminal's command line (renderer.js): no attachments, no agent chips. */
+#composer.shell #composer-attach, #composer.shell #chip-model, #composer.shell #chip-effort, #composer.shell #chip-mode, #composer.shell #attachments { display: none !important; }
+#composer.shell #composer-input { font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; }
