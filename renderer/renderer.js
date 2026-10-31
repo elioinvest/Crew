@@ -62,7 +62,9 @@ const AGENTS = {
 
 // SSH terminals aren't agents, but show in panes like them.
 const SSH_KIND = { label: 'SSH', group: 'Terminal', badge: '<svg class="agent-badge ssh" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>' };
-const agentInfo = (agent) => AGENTS[agent] || SSH_KIND;
+// A file opened from the file browser shows in a pane of its own (files.js).
+const FILE_KIND = { label: 'File', group: 'Files', badge: '<svg class="agent-badge file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>' };
+const agentInfo = (agent) => AGENTS[agent] || (agent === 'file' ? FILE_KIND : SSH_KIND);
 
 // The custom provider a session runs on (providers.js), or null for the CLI's own account.
 function providerOf(sessionId) {
@@ -84,6 +86,7 @@ function findSession(sessionId) {
 
 function sessionTitle(sessionId) {
   if (sessionId?.startsWith('ssh:')) return hostTerminalTitle(sessionId); // hosts.js
+  if (sessionId?.startsWith('file:')) return filePaneTitle(); // files.js
   const s = findSession(sessionId);
   if (s) return s.title;
   const agent = state.terms.get(sessionId)?.agent || state.pendingNew.get(sessionId)?.agent;
@@ -650,7 +653,7 @@ function activate(sessionId, { focusInput = true } = {}) {
     $('#head-path').textContent = `${providerOf(sessionId)?.name || agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}`;
     if (switching) { inputEl.value = entry.draft; autosizeInput(); renderAttachments(); }
     loadSettings(sessionId);
-    requestAnimationFrame(() => { safeFit(entry); if (focusInput) (entry.agent === 'ssh' ? entry.term : inputEl).focus(); });
+    requestAnimationFrame(() => { safeFit(entry); if (focusInput) (entry.agent === 'ssh' ? entry.term : entry.agent === 'file' ? entry.view.querySelector('.files-input') || entry.view : inputEl).focus(); });
   } else {
     $('#head-title').textContent = '';
     $('#head-path').textContent = '';
@@ -665,6 +668,11 @@ function activate(sessionId, { focusInput = true } = {}) {
 function closeSession(sessionId) {
   const entry = state.terms.get(sessionId);
   if (!entry) return;
+  // A file pane with unsaved edits asks first (files.js).
+  if (entry.beforeClose && !entry.closing) {
+    entry.beforeClose().then((ok) => { if (ok) { entry.closing = true; closeSession(sessionId); } });
+    return;
+  }
   if (entry.termId) { api.kill(entry.termId); state.termToSession.delete(entry.termId); }
   entry.resizeObserver.disconnect();
   entry.term.dispose();
@@ -1534,8 +1542,8 @@ function scheduleScreenRead(entry) {
 
 function renderComposer() {
   const entry = state.terms.get(state.active);
-  composerEl.classList.toggle('hidden', !entry || entry.agent === 'ssh');
-  if (!entry || entry.agent === 'ssh') return;
+  composerEl.classList.toggle('hidden', !entry || entry.agent === 'ssh' || entry.agent === 'file');
+  if (!entry || entry.agent === 'ssh' || entry.agent === 'file') return;
   const s = currentSettings(entry);
   const codex = entry.agent === 'codex';
   const prov = providerOf(state.active);

@@ -1130,3 +1130,22 @@ body.git-open #btn-git { color: var(--text); background: var(--active); }
 .files-save:hover { opacity: .85; }
 /* Bold or italic tokens would be wider than the textarea's text and push the caret out of line. */
 .files-layer .files-code * { font-weight: inherit !important; font-style: normal !important; }
+
+/* A file opened from the file browser, in a pane of its own (files.js). */
+.term.file-pane { background: var(--main-bg); }
+.file-pane-view { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.file-pane-view .files-text { flex: 1; }
+/* The panel holds only the tree now. */
+#files { min-width: 220px; }
+#files-side { flex: 1; width: auto !important; min-width: 0; }
+
+/* The editor wraps long lines (files.js): code drawn a line per block with its number beside it,
+   the textarea on top with the same width, padding and wrapping. No sideways scrolling. */
+.files-text { overflow-x: hidden; overflow-y: auto; display: block; }
+.files-layer { position: relative; min-width: 0; width: 100%; --gutter: 48px; }
+.files-layer .files-code, .files-input { padding: 8px 12px 8px var(--gutter); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; }
+.files-layer .files-code { display: block; }
+.files-layer .fl { position: relative; min-height: 18px; }
+.files-layer .fl::before { content: attr(data-n); position: absolute; left: calc(-1 * var(--gutter)); width: calc(var(--gutter) - 14px); text-align: right; color: var(--muted); user-select: none; }
+.files-layer::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--gutter) - 6px); border-left: 1px solid var(--border); pointer-events: none; }
+.files-input { overflow: hidden; }

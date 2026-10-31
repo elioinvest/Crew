@@ -1,10 +1,10 @@
 // The file browser beside the terminal (files.js in the main process): the active session's folder
-// as a tree, opened a folder at a time, with the files Git ignores dimmed; finding files by name or
-// by content; and a file's whole content beside the tree. It follows the active session's folder,
-// like the Git panel, and shares the right side with it.
+// as a tree, opened a folder at a time, with the files Git ignores dimmed, and finding files by
+// name or by content. A file opens in a pane of its own in the main area, where it can be edited.
+// The panel follows the active session's folder, like the Git panel, and shares the right side.
 
 const filesEl = $('#files');
-const files = { open: false, root: null, expanded: new Set(), mode: 'name', selected: null, query: '', edit: null };
+const files = { open: false, root: null, expanded: new Set(), mode: 'name', selected: null, query: '', edit: null, shown: null };
 
 const fileIcon = '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
 const folderIcon = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
@@ -30,11 +30,10 @@ async function openFiles(folder) {
   if (switching) {
     files.expanded = new Set();
     files.selected = null;
-    $('#files-view').replaceChildren(el('div', { class: 'files-empty' }, 'Click a file to see its content.'));
   }
   if (!files.open) {
     files.open = true;
-    if (!localStorage.getItem('filesWidth')) filesEl.style.width = `${Math.max(520, Math.round((innerWidth - $('#sidebar').getBoundingClientRect().right) * 0.5))}px`;
+    if (!localStorage.getItem('filesWidth2')) filesEl.style.width = '320px';
     filesEl.classList.remove('hidden');
     $('#files-resizer').classList.remove('hidden');
     document.body.classList.add('files-open');
@@ -137,11 +136,51 @@ for (const b of document.querySelectorAll('.files-mode')) {
 
 // ---------- a file's content ----------
 
+// ---------- the file pane ----------
+
+// One pane in the main area shows the opened file, as a preview: opening another file replaces it
+// (after asking about unsaved edits). It takes part in the pane layout like a session.
+const FILE_PANE = 'file:view';
+const filePaneTitle = () => (files.shown ? files.shown.rel.split('/').pop() : 'File');
+
+function filePane() {
+  let entry = state.terms.get(FILE_PANE);
+  if (entry) return entry;
+  const view = el('div', { class: 'file-pane-view' });
+  const container = el('div', { class: 'term file-pane' }, view);
+  termStash.append(container); // renderer.js
+  entry = {
+    agent: 'file', termId: null, el: container, view, projectPath: files.root, cwd: files.root, exited: false,
+    term: { cols: 80, rows: 24, modes: { mouseTrackingMode: 'none' }, buffer: { active: { length: 0, baseY: 0, getLine: () => null } }, focus() {}, dispose() {}, reset() {}, write() {}, hasSelection: () => false },
+    fit: { fit() {} }, resizeObserver: { disconnect() {} },
+    draft: '', attachments: [], fileSettings: {}, live: {}, overrides: {},
+    beforeClose: () => leaveEdits(),
+  };
+  state.terms.set(FILE_PANE, entry);
+  return entry;
+}
+
+// Shows the file pane: where it is already, else in an empty pane, else split beside the focused one.
+function showFilePane() {
+  const entry = filePane();
+  entry.projectPath = files.root;
+  entry.cwd = files.root;
+  entry.where = files.shown ? `${files.root}\\${files.shown.rel.replace(/\//g, '\\')}` : files.root;
+  const shown = leafOf(FILE_PANE);
+  if (shown) { focusPane(shown); activate(FILE_PANE); return; }
+  const empty = leaves().find((l) => !l.session);
+  if (empty) state.focus = empty.id;
+  else splitPane('row', focusedLeaf());
+  activate(FILE_PANE);
+}
+
 async function showFile(rel, line) {
   if (!(await leaveEdits())) return;
   files.selected = rel;
+  files.shown = { rel };
   for (const r of document.querySelectorAll('#files-tree .files-row')) r.classList.toggle('selected', r.title === rel);
-  const view = $('#files-view');
+  const view = filePane().view;
+  showFilePane();
   const saveBtn = el('button', { class: 'files-save hidden', title: 'Save (Ctrl+S)', onclick: () => saveEdits() }, 'Save');
   const head = el('div', { class: 'files-view-head' },
     el('span', { class: 'files-view-path', title: rel }, rel),
@@ -160,9 +199,11 @@ async function showFile(rel, line) {
       // A content match: scroll to its line, mark it, and put the caret there.
       requestAnimationFrame(() => {
         const input = body.querySelector('.files-input');
-        const lh = parseFloat(getComputedStyle(input).lineHeight) || 18;
-        body.scrollTop = Math.max(0, (line - 4) * lh);
-        body.append(el('div', { class: 'files-mark', style: `top: ${(line - 1) * lh + 8}px; height: ${lh}px` }));
+        const row = body.querySelector(`.fl[data-n="${line}"]`);
+        if (row) {
+          body.scrollTop = Math.max(0, row.offsetTop - 60);
+          body.querySelector('.files-layer').append(el('div', { class: 'files-mark', style: `top: ${row.offsetTop}px; height: ${row.offsetHeight}px` }));
+        }
         const at = input.value.split('\n').slice(0, line - 1).join('\n').length + (line > 1 ? 1 : 0);
         input.focus({ preventScroll: true });
         input.setSelectionRange(at, at);
@@ -170,31 +211,33 @@ async function showFile(rel, line) {
     }
   }
   view.replaceChildren(head, body);
+  updatePaneHeads(); // renderer.js: the pane's title is the file's name
+  $('#head-title').textContent = filePaneTitle();
+  if (state.active === FILE_PANE) requestAnimationFrame(() => body.querySelector?.('.files-input')?.focus({ preventScroll: !!line }));
 }
 
 // ---------- editing ----------
 
 // The editor: a transparent textarea over the highlighted code, both in the same font and size,
-// so typing happens in the textarea and the colors below follow it. The file keeps its line
-// endings (CRLF or LF) when saved.
+// so typing happens in the textarea and the colors below follow it. Long lines wrap to the pane's
+// width in both; the code is drawn a line per block, its number beside it, so a wrapped line keeps
+// one number. The file keeps its line endings (CRLF or LF) when saved.
 function makeEditor(rel, original, head) {
   const eol = original.includes('\r\n') ? '\r\n' : '\n';
   const text = original.replace(/\r\n/g, '\n');
-  const gutter = el('div', { class: 'files-gutter' });
-  const code = el('pre', { class: 'files-code hljs' });
-  const input = el('textarea', { class: 'files-input', spellcheck: 'false', autocomplete: 'off', wrap: 'off' });
+  const code = el('div', { class: 'files-code hljs' });
+  const input = el('textarea', { class: 'files-input', spellcheck: 'false', autocomplete: 'off' });
   input.value = text;
   const layer = el('div', { class: 'files-layer' }, code, input);
-  const body = el('div', { class: 'files-text' }, gutter, layer);
+  const body = el('div', { class: 'files-text' }, layer);
   files.edit = { rel, eol, saved: text, input, head };
   const paint = () => {
     const t = input.value;
-    const html = highlightFile(rel, t);
-    // A trailing newline needs a character after it, or the last empty line has no height.
-    if (html != null) code.innerHTML = `${html}\n `;
-    else code.textContent = `${t}\n `;
-    const n = t.split('\n').length;
-    if (gutter.childElementCount !== n || gutter.dataset.n !== String(n)) { gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n'); gutter.dataset.n = String(n); }
+    const html = highlightFile(rel, t) ?? escapeHtml(t);
+    const lines = splitHtmlLines(html);
+    // Room for the line numbers, by the widest one.
+    layer.style.setProperty('--gutter', `calc(${String(lines.length).length}ch + 28px)`);
+    code.innerHTML = lines.map((l, i) => `<div class="fl" data-n="${i + 1}">${l || '\u200b'}</div>`).join('');
   };
   let timer = null;
   input.addEventListener('input', () => {
@@ -208,6 +251,24 @@ function makeEditor(rel, original, head) {
   });
   paint();
   return body;
+}
+
+const escapeHtml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Highlighted HTML split into lines; a span that crosses a line break (a long comment, a template
+// string) is closed at the end of the line and opened again on the next.
+function splitHtmlLines(html) {
+  const lines = [];
+  const open = [];
+  let cur = '';
+  for (const m of html.matchAll(/(<span[^>]*>)|(<\/span>)|(\n)|([^<\n]+)/g)) {
+    if (m[1]) { cur += m[1]; open.push(m[1]); }
+    else if (m[2]) { cur += m[2]; open.pop(); }
+    else if (m[3]) { lines.push(cur + '</span>'.repeat(open.length)); cur = open.join(''); }
+    else cur += m[4];
+  }
+  lines.push(cur);
+  return lines;
 }
 
 // Tab indents (the selected lines, or inserts a tab); Shift+Tab takes one level off.
@@ -287,7 +348,7 @@ addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e
 // The panel's left edge, and the line between the tree and the content: drag to resize.
 (() => {
   const resizer = $('#files-resizer');
-  const saved = parseInt(localStorage.getItem('filesWidth') || '', 10);
+  const saved = parseInt(localStorage.getItem('filesWidth2') || '', 10); // the tree alone (the content moved to a pane)
   if (saved) filesEl.style.width = `${saved}px`;
   resizer.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -296,12 +357,12 @@ addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e
     const right = filesEl.getBoundingClientRect().right;
     const move = (ev) => {
       const max = right - $('#sidebar').getBoundingClientRect().right - 360; // keep the terminal usable
-      filesEl.style.width = `${Math.max(380, Math.min(max, right - ev.clientX))}px`;
+      filesEl.style.width = `${Math.max(220, Math.min(max, right - ev.clientX))}px`;
     };
     const up = () => {
       resizer.classList.remove('dragging');
       document.body.classList.remove('resizing', 'resizing-x');
-      localStorage.setItem('filesWidth', parseInt(filesEl.style.width, 10));
+      localStorage.setItem('filesWidth2', parseInt(filesEl.style.width, 10));
       removeEventListener('mousemove', move);
       removeEventListener('mouseup', up);
       fitTerminals();
@@ -310,4 +371,3 @@ addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e
     addEventListener('mouseup', up);
   });
 })();
-dragSplit($('#files-split'), $('#files-side'), 'x', 'filesTreeWidth', 180, () => filesEl.offsetWidth - 200); // git.js
