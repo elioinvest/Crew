@@ -178,7 +178,8 @@ const SLASH_COMMANDS = {
 };
 
 const commandPop = $('#command-pop');
-const commandCache = new Map(); // "agent:project" -> the commands scanned on disk
+const commandCache = new Map(); // "agent:project" -> { at, list }: the commands scanned on disk
+const COMMAND_REFRESH_MS = 5000; // rescan this often, so a skill added while the app runs shows up
 const builtinCache = {}; // agent -> the built-ins above, as { name, description }
 let commandState = null; // { token, matches, index }
 let commandDismissed = null; // the token Esc closed, until the token changes
@@ -194,14 +195,18 @@ function commandsFor(entry) {
   if (!entry || (entry.agent !== 'claude' && entry.agent !== 'codex')) return [];
   builtinCache[entry.agent] ||= SLASH_COMMANDS[entry.agent].map(([name, description]) => ({ name, description }));
   const key = `${entry.agent}:${entry.projectPath || ''}`;
-  if (!commandCache.has(key)) {
-    commandCache.set(key, []); // one scan per session folder; rows fill in when it lands
+  // Show what was scanned last time and rescan in the background: a command or skill written
+  // while the app runs (a new SKILL.md, a new file in ~/.claude/commands) appears on the next
+  // "/" instead of waiting for a restart.
+  const hit = commandCache.get(key);
+  if (!hit || Date.now() - hit.at >= COMMAND_REFRESH_MS) {
+    commandCache.set(key, { at: Date.now(), list: hit ? hit.list : [] });
     api.listCommands(entry.agent, entry.projectPath || '').then((list) => {
-      commandCache.set(key, Array.isArray(list) ? list : []);
-      if (commandState) updateCommands();
+      commandCache.set(key, { at: Date.now(), list: Array.isArray(list) ? list : [] });
+      if (commandState) updateCommands(); // the list is open: redraw it with the new scan
     }).catch(() => {});
   }
-  return [...commandCache.get(key), ...builtinCache[entry.agent]];
+  return [...commandCache.get(key).list, ...builtinCache[entry.agent]];
 }
 
 function hideCommands() {
