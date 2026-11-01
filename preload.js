@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
   onSshPromptCancel: (cb) => ipcRenderer.on('ssh:prompt-cancel', (_e, id) => cb(id)),
   answerSsh: (id, answer) => ipcRenderer.send('ssh:answer', id, answer),
 
+  listCommands: (agent, projectPath) => ipcRenderer.invoke('commands:list', agent, projectPath),
   listAgents: () => ipcRenderer.invoke('agents:list'),
   codexModels: () => ipcRenderer.invoke('agents:codex-models'),
   saveAgent: (a) => ipcRenderer.invoke('agents:save', a),

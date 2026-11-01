@@ -935,11 +935,14 @@ body.resizing-x { cursor: col-resize; }
 .run-result { margin: 0; padding: 10px 12px; background: var(--side-bg); border-radius: 8px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; max-height: 55vh; overflow: auto; user-select: text; }
 
 .composer-card { position: relative; }
-#mention-pop { position: absolute; left: 12px; bottom: calc(100% + 6px); z-index: 30; min-width: 280px; max-width: 480px; background: var(--main-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16); padding: 4px; font-size: 13px; }
+#mention-pop, #command-pop { position: absolute; left: 12px; bottom: calc(100% + 6px); z-index: 30; min-width: 280px; max-width: 480px; background: var(--main-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16); padding: 4px; font-size: 13px; }
+#command-pop { min-width: 360px; max-width: 560px; }
 .mention-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
 .mention-item .agent-icon { display: inline-flex; }
 .mention-item.on, .mention-item:hover { background: var(--hover); }
 .mention-item .muted { color: var(--muted); }
+.cmd-desc { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.cmd-from { color: var(--muted); font-size: 11.5px; opacity: .8; }
 .field-hint.danger { color: #c4462d; }
 .modal-actions button.primary:disabled { opacity: .4; cursor: default; }
 :root[lang="zh-CN"] .pane.focused .pane-head::after { content: "当前"; }

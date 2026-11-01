@@ -651,7 +651,12 @@ function activate(sessionId, { focusInput = true } = {}) {
   if (entry) {
     $('#head-title').textContent = sessionTitle(sessionId);
     $('#head-path').textContent = `${providerOf(sessionId)?.name || agentInfo(entry.agent).label} · ${entry.where || hostWhere(entry.projectPath) || entry.cwd}`;
-    if (switching) { inputEl.value = entry.draft; autosizeInput(); renderAttachments(); }
+    if (switching) {
+      inputEl.value = entry.draft;
+      autosizeInput();
+      renderAttachments();
+      inputEl.dispatchEvent(new Event('input')); // the draft came back: refresh its @ and / lists
+    }
     loadSettings(sessionId);
     requestAnimationFrame(() => { safeFit(entry); if (focusInput) (entry.agent === 'ssh' ? entry.term : entry.agent === 'file' ? entry.view.querySelector('.files-input') || entry.view : inputEl).focus(); });
   } else {
@@ -1632,6 +1637,7 @@ async function shellSubmit(entry, value) {
     api.write(entry.termId, `${line}\r`);
     if (lines.length > 1) await sleep(120); // let the shell take each line
   }
+  entry.term.scrollToBottom();
 }
 
 function canSend() {
@@ -1666,10 +1672,15 @@ async function submitComposer() {
     refs.push(codex ? q : `@${q}`);
   }
   const body = withAgentNote([refs.join(' '), text].filter(Boolean).join(' ')); // @agents (agents.js)
-  if (body) paste(entry, `${files.some((f) => f.isImage) ? ' ' : ''}${body.replace(/\r\n?|\n/g, '\r')}`);
+  // Newlines stay "\n" (Ctrl+J in the agent's terminal): a "\r" inside the paste is Enter, which
+  // sends every line of a short message as its own turn.
+  if (body) paste(entry, `${files.some((f) => f.isImage) ? ' ' : ''}${body.replace(/\r\n?/g, '\n')}`);
   // An Enter too soon after a long paste counts as part of it (Codex, at least), so wait longer.
   await sleep(files.length ? 300 : body.length > 200 ? 700 : 150);
   api.write(entry.termId, '\r');
+  // Reading back up stops the terminal from following output; sending means "show me the reply",
+  // so jump to the bottom again (xterm keeps following from there).
+  entry.term.scrollToBottom();
 }
 
 inputEl.addEventListener('input', autosizeInput);
@@ -1682,7 +1693,10 @@ inputEl.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (canSend()) submitComposer();
     else if (entry.exited) respawn(state.active, isOnDisk(state.active));
-    else if (entry.termId) api.write(entry.termId, '\r'); // confirm a prompt shown in the terminal
+    else if (entry.termId) { // confirm a prompt shown in the terminal
+      api.write(entry.termId, '\r');
+      entry.term.scrollToBottom();
+    }
     return;
   }
   // With an empty box, keys that drive the agent's own menus and prompts go to the terminal.

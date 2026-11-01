@@ -1139,6 +1139,96 @@ ipcMain.handle('config:set', (_e, patch) => {
   return config;
 });
 
+// ---------- slash commands ----------
+// The prompt box completes commands: the agents' built-in ones (renderer/commands.js) plus the
+// ones written on disk — ~/.claude/commands and the project's, skills, and ~/.codex/prompts.
+
+const commandScanCache = new Map(); // "agent:project" -> { at, list }
+const COMMAND_SCAN_TTL = 5000;
+
+// The description a command file declares in its front matter ("---\ndescription: x\n---").
+function commandFrontMatter(file) {
+  try {
+    const head = fs.readFileSync(file, 'utf8').slice(0, 4096);
+    const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(head);
+    const out = {};
+    if (!block) return out;
+    for (const line of block[1].split(/\r?\n/)) {
+      const kv = /^([A-Za-z-]+):\s*(.*)$/.exec(line);
+      if (kv) out[kv[1].toLowerCase()] = kv[2].replace(/^["']|["']$/g, '').trim();
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// Markdown files under a folder, recursively (missing folders just give none).
+function commandFiles(dir) {
+  const out = [];
+  try {
+    for (const e of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      // Entries from a recursive read carry their folder ("parentPath"; Node 20 called it "path").
+      if (e.isFile() && /\.md$/i.test(e.name)) out.push(path.join(e.parentPath || e.path || dir, e.name));
+    }
+  } catch {}
+  return out;
+}
+
+const commandList = (agent, projectPath) => {
+  const list = [];
+  const add = (name, description, from) => {
+    const clean = String(name || '').trim();
+    if (!clean || list.some((c) => c.name === clean)) return;
+    const desc = String(description || '').trim().replace(/\s+/g, ' ');
+    list.push({ name: clean, description: desc.length > 100 ? `${desc.slice(0, 97)}…` : desc, from });
+  };
+
+  if (agent === 'codex') {
+    // Codex's custom prompts: one file per command, /name runs prompts/name.md.
+    for (const file of commandFiles(path.join(CODEX_HOME, 'prompts'))) {
+      add(path.basename(file, path.extname(file)), commandFrontMatter(file).description, 'home');
+    }
+    return list;
+  }
+  if (agent !== 'claude') return list;
+
+  // Commands: ~/.claude/commands/x.md is /x; a subfolder becomes a namespace (/frontend:x).
+  const roots = [[path.join(os.homedir(), '.claude', 'commands'), 'home']];
+  if (projectPath) roots.push([path.join(projectPath, '.claude', 'commands'), 'project']);
+  for (const [root, from] of roots) {
+    for (const file of commandFiles(root)) {
+      const name = path.relative(root, file).replace(/\\/g, '/').replace(/\.md$/i, '').replace(/\//g, ':');
+      add(name, commandFrontMatter(file).description, from);
+    }
+  }
+  // Skills run the same way (/name), from ~/.claude/skills and the project's .claude/skills.
+  const skillRoots = [[path.join(os.homedir(), '.claude', 'skills'), 'home']];
+  if (projectPath) skillRoots.push([path.join(projectPath, '.claude', 'skills'), 'project']);
+  for (const [root, from] of skillRoots) {
+    try {
+      for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+        const file = path.join(root, e.name, 'SKILL.md');
+        if (!e.isDirectory() || !fs.existsSync(file)) continue;
+        const meta = commandFrontMatter(file);
+        add(meta.name || e.name, meta.description, from);
+      }
+    } catch {}
+  }
+  return list;
+};
+
+ipcMain.handle('commands:list', (_e, agent, projectPath) => {
+  if (agent !== 'claude' && agent !== 'codex') return [];
+  const key = `${agent}:${projectPath || ''}`;
+  const hit = commandScanCache.get(key);
+  const now = Date.now();
+  if (hit && now - hit.at < COMMAND_SCAN_TTL) return hit.list;
+  const list = commandList(agent, projectPath);
+  commandScanCache.set(key, { at: now, list });
+  return list;
+});
+
 // ---------- window ----------
 
 function overlayFor(theme) {
