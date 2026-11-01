@@ -107,6 +107,14 @@ Add your own APIs as agents beside Claude and Codex: relays, self-hosted service
 - Each provider appears with its icon in the **New session** menus, on hosts and as an option for @-agents, and has its own group in the sidebar. The header, the prompt box and the chips show the provider, its models and its reasoning effort. Picking another model or effort switches it in the running session, without a restart (Claude Code: `/model`, `/effort`; Codex: `/model … --reasoning=…`, with the provider's models given to Codex as a model catalog), and a session keeps what you picked. The catalog carries Codex's own base prompt, `codex-prompt.md` from [openai/codex](https://github.com/openai/codex) (Apache-2.0).
 - The API key is saved encrypted with Windows data protection, and only the sessions you start on that provider receive it. Your own Claude and Codex settings files aren't changed.
 
+### Phone access
+
+Use Crew on your computer from your phone's browser (an iPhone too) or from the Crew app (Android; the source is in the separate CrewApp project).
+
+- In **Settings → Phone access**, check **Let paired phones connect**, then scan the code in Settings with the phone camera to open Crew in the browser (or tap **Scan QR code** in the app). Or open the address shown in the phone browser and enter the code.
+- The app lists the sessions and SSH terminals open in Crew and whether each is working or idle, shows their output live and lets you type into them. **Stop** interrupts what a session is doing, **＋** sends a photo or file from the phone to the agent (uploaded to the computer, its path put into the message), and **/** runs commands like `/model` and `/compact`. When a session finishes while you aren't watching it, the phone tells you. You can also resume or start sessions in your projects, follow agent runs, and answer `crew-ssh` approvals (Allow, Allow 15 min or Deny).
+- The phone and the computer need to be on the same Wi-Fi, or anywhere if both have [Tailscale](https://tailscale.com). Crew listens on port 7788 and accepts only devices that have the pairing code. **New pairing code** cuts off the phones already paired until they scan again.
+
 ### Window
 
 - The button at the top left hides or shows the sidebar.
@@ -127,3 +135,5 @@ npm run dist       # build the Windows installer into release/
 ## License
 
 [MIT](LICENSE)
+
+The Claude model list under the prompt box, with each model's reasoning effort levels, comes from the model list [T3 Code](https://github.com/pingdotgg/t3code) publishes (MIT License, Copyright (c) 2026 T3 Tools Inc.): Crew ships a copy and refreshes it once a day.

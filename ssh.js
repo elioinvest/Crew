@@ -136,6 +136,8 @@ function parseSshConfig(text) {
 // Host-key trust, passwords, 2FA and approvals are asked in Crew while the agent's call waits.
 const prompts = new Map();
 let promptSeq = 0;
+let promptHooks = { onPrompt() {}, onDone() {} }; // a paired phone (remote.js)
+const setPromptHooks = (h) => { promptHooks = h; };
 
 function ask(kind, data) {
   const w = getWin();
@@ -143,6 +145,7 @@ function ask(kind, data) {
   const id = ++promptSeq;
   const promise = new Promise((resolve) => prompts.set(id, resolve));
   w.webContents.send('ssh:prompt', { ...data, id, kind });
+  promptHooks.onPrompt({ ...data, id, kind });
   if (!w.isVisible()) w.show();
   if (!w.isFocused()) w.flashFrame(true);
   return {
@@ -151,17 +154,27 @@ function ask(kind, data) {
       if (!prompts.has(id)) return;
       prompts.get(id)(null);
       prompts.delete(id);
+      promptHooks.onDone(id);
       if (!w.isDestroyed()) w.webContents.send('ssh:prompt-cancel', id);
     },
   };
 }
 
-ipcMain.on('ssh:answer', (_e, id, answer) => {
+function answerPrompt(id, answer) {
   const resolve = prompts.get(id);
   if (!resolve) return;
   prompts.delete(id);
+  promptHooks.onDone(id);
   resolve(answer);
-});
+}
+ipcMain.on('ssh:answer', (_e, id, answer) => answerPrompt(id, answer));
+// Answered on a phone: the window drops its card too.
+function answerFromPhone(id, answer) {
+  if (!prompts.has(id)) return;
+  answerPrompt(id, answer);
+  const w = getWin();
+  if (w && !w.isDestroyed()) w.webContents.send('ssh:prompt-cancel', id);
+}
 
 // ---------- host keys: trust on first use ----------
 
@@ -942,4 +955,8 @@ function shutdown() {
   for (const id of [...pool.keys()]) dropConn(id);
 }
 
-module.exports = { init, shutdown, sessionEnv, openShell, registerOps, onlyReads, parseSshConfig, writeCodexRules };
+const hostName = (id) => { const f = findHost(id); return f.error ? null : f.host.name; };
+// For phones (remote.js): the hosts without their secrets.
+const hostsBrief = () => allHosts().map((h) => ({ id: h.id, name: h.name, group: h.group || '', user: h.user || '', host: h.host, port: h.port || 22, workspace: workspacePath(h), connected: pool.has(h.id) }));
+
+module.exports = { hostsBrief, init, shutdown, sessionEnv, openShell, registerOps, onlyReads, parseSshConfig, writeCodexRules, setPromptHooks, answerFromPhone, hostName };
