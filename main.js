@@ -34,6 +34,8 @@ const agents = require('./agents');
 const browserForAgents = require('./browser');
 const providers = require('./providers');
 require('./files'); // the file browser beside the terminal
+const remote = require('./remote'); // phone access (the Crew app)
+const claudeModels = require('./claude-models'); // Claude's models and their effort levels, for the chips
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -192,6 +194,7 @@ function readSessionMeta(file) {
   const meta = {
     id: path.basename(file, '.jsonl'),
     agent: 'claude',
+    file,
     cwd,
     title: customTitle || title || (firstPrompt ? firstPrompt.slice(0, 80) : null),
     mtime: st.mtimeMs,
@@ -241,6 +244,7 @@ function readCodexMeta(file) {
       meta = {
         id: info.id,
         agent: 'codex',
+        file,
         cwd: info.cwd,
         created: Date.parse(info.timestamp) || st.birthtimeMs,
         firstPrompt: firstPrompt ? cleanPrompt(firstPrompt).slice(0, 80) : null,
@@ -522,11 +526,13 @@ function startPty(file, fileArgs, { cwd, cols, rows, meta, env = cleanEnv() }) {
     useConpty: true,
   });
 
-  ptys.set(termId, { proc, cwd, ...meta });
-  proc.onData((data) => win && !win.isDestroyed() && win.webContents.send('pty:data', termId, data));
+  ptys.set(termId, { proc, cwd, cols: cols || 120, rows: rows || 30, ...meta });
+  proc.onData((data) => { if (win && !win.isDestroyed()) win.webContents.send('pty:data', termId, data); remote.onData(termId, data); });
+  remote.onStart();
   proc.onExit(({ exitCode }) => {
     ptys.delete(termId);
     win && !win.isDestroyed() && win.webContents.send('pty:exit', termId, exitCode);
+    remote.onExit(termId, exitCode);
   });
   return termId;
 }
@@ -554,11 +560,13 @@ ipcMain.handle('pty:spawn', (_e, { agent = 'claude', cwd, sessionId, resume, col
 ipcMain.handle('ssh:shell', async (_e, { hostId, termId, cols, rows }) => {
   const send = (ch, ...a) => win && !win.isDestroyed() && win.webContents.send(ch, termId, ...a);
   try {
-    const proc = await ssh.openShell(hostId, cols || 120, rows || 30, (d) => send('pty:data', d), (code) => {
+    const proc = await ssh.openShell(hostId, cols || 120, rows || 30, (d) => { send('pty:data', d); remote.onData(termId, d); }, (code) => {
       ptys.delete(termId);
       send('pty:exit', code);
+      remote.onExit(termId, code);
     });
-    ptys.set(termId, { proc, sessionId: `ssh:${hostId}`, agent: 'ssh' });
+    ptys.set(termId, { proc, sessionId: `ssh:${hostId}`, agent: 'ssh', cols: cols || 120, rows: rows || 30 });
+    remote.onStart();
     return { termId };
   } catch (e) {
     return { error: e.message || String(e) };
@@ -573,7 +581,15 @@ ipcMain.handle('pty:install', (_e, { agent, cols, rows }) => {
 
 ipcMain.on('pty:write', (_e, termId, data) => ptys.get(termId)?.proc.write(data));
 ipcMain.on('pty:resize', (_e, termId, cols, rows) => {
-  try { ptys.get(termId)?.proc.resize(Math.max(cols, 2), Math.max(rows, 2)); } catch { /* exited */ }
+  const tp = ptys.get(termId);
+  if (!tp) return;
+  // The window's size, kept for when a phone that's showing this terminal at its own size leaves.
+  tp.deskCols = Math.max(cols, 2);
+  tp.deskRows = Math.max(rows, 2);
+  if (tp.phoneSize) return;
+  tp.cols = tp.deskCols;
+  tp.rows = tp.deskRows;
+  try { tp.proc.resize(tp.cols, tp.rows); } catch { /* exited */ }
 });
 // A new Codex terminal starts under a temporary id; the renderer reports the real one once known.
 ipcMain.on('pty:rekey', (_e, termId, sessionId) => {
@@ -1244,6 +1260,7 @@ function killAllPtys() {
 }
 
 app.on('before-quit', () => {
+  remote.stop();
   if (quitting === 'done') return;
   quitting = 'done';
   killAllPtys();
@@ -1260,9 +1277,22 @@ app.whenReady().then(() => {
     getWin: () => win, cleanEnv, sessionEnv: ssh.sessionEnv, shellCommand, getConfig: () => config, writeCodexRules: ssh.writeCodexRules,
     providerLaunch: providers.launch, applyEnv: providers.applyEnv, hasProvider: providers.has,
     onRunDone: () => refreshUsage('claude', true).then(() => refreshUsage('codex', true)), // runs spend quota
+    onRun: (r) => remote.onRun(r), // a paired phone sees the runs too
   });
   ssh.registerOps(agents.ops);
   browserForAgents.init({ commandExists, cleanEnv });
+  ssh.setPromptHooks({ onPrompt: remote.onPrompt, onDone: remote.onPromptDone });
+  claudeModels.init({
+    dataDir: () => app.getPath('userData'),
+    claudeVersionArgv: () => { const [file, args] = shellCommand([splitArgs(config.claudeCommand || 'claude')[0] || 'claude', '--version']); return [file, args, { env: cleanEnv(), windowsVerbatimArguments: process.platform === 'win32' }]; },
+  });
+  remote.init({
+    getWin: () => win, ptys, scanProjects, getConfig: () => config,
+    setConfig: (patch) => { config = { ...config, ...patch }; saveConfig(config); },
+    sshAnswer: ssh.answerFromPhone, stopRun: (id) => agents.stop(id), hostName: ssh.hostName, attachDir: ATTACH_DIR, providers: providers.brief,
+    hosts: ssh.hostsBrief, agents: agents.brief,
+    sessionFile: (id) => { for (const p of scanProjects()) { const s = p.sessions.find((x) => x.id === id); if (s?.file) return { file: s.file, agent: s.agent }; } return null; },
+  });
   createTray();
   startWatcher();
   cleanAttachments();

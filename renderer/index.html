@@ -326,6 +326,22 @@
       </div>
       <label class="check"><input id="cfg-tray" type="checkbox" /> Keep running in the tray when the window is closed</label>
       <label class="check"><input id="cfg-usage" type="checkbox" /> Show plan usage at the bottom (Claude sessions Crew starts get a status line hook that records it)</label>
+      <div class="ego-box" id="remote-box">
+        <span class="ego-title">Phone access</span>
+        <span class="field-hint">Use Crew from the Crew app on your phone: see the open sessions, type into them, start sessions and answer approvals. On the same Wi-Fi, or from anywhere through Tailscale.</span>
+        <label class="check"><input id="cfg-remote" type="checkbox" /> Let paired phones connect</label>
+        <div id="remote-pair" class="hidden">
+          <img id="remote-qr" alt="Pairing QR code" />
+          <div class="remote-side">
+            <span class="field-hint">Scan this code with the phone camera to open Crew in the phone browser (or with the Crew app). Or open the address below in the phone browser and enter the code:</span>
+            <code id="remote-code"></code>
+            <span class="ego-line" id="remote-addrs"></span>
+            <span class="ego-line" id="remote-devices"></span>
+            <span class="ego-line danger" id="remote-error"></span>
+            <span class="ego-actions"><button type="button" id="remote-new" class="small-btn" title="Paired phones have to scan the new code">New pairing code</button></span>
+          </div>
+        </div>
+      </div>
       <div class="ego-box">
         <span class="ego-title">ego lite: the browser for agents</span>
         <span class="ego-line" id="ego-app"></span>
