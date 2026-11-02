@@ -48,6 +48,7 @@ const publicRun = (r) => ({
 function notify(r) {
   const w = deps.getWin();
   if (w && !w.isDestroyed()) w.webContents.send('crew:run', publicRun(r));
+  deps.onRun?.(publicRun(r)); // a paired phone (remote.js)
 }
 
 const short = (s, n = 90) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
@@ -358,6 +359,10 @@ ipcMain.handle('agents:runs', () => [...runs.values()].map(publicRun));
 ipcMain.handle('agents:stop', (_e, id) => { const r = runs.get(id); if (r) stopRun(r); });
 
 function init(d) { deps = d; }
+function stop(id) { const r = runs.get(id); if (r) stopRun(r); }
 function shutdown() { for (const r of runs.values()) stopRun(r); }
 
-module.exports = { init, shutdown, ops };
+// For phones (remote.js).
+const brief = () => allAgents().map((a) => ({ id: a.id, name: a.name, cli: a.cli, access: a.access, model: a.model || '' }));
+
+module.exports = { brief, init, shutdown, ops, stop };

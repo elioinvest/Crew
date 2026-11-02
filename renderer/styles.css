@@ -1156,3 +1156,9 @@ body.git-open #btn-git { color: var(--text); background: var(--active); }
 /* The prompt box as a host terminal's command line (renderer.js): no attachments, no agent chips. */
 #composer.shell #composer-attach, #composer.shell #chip-model, #composer.shell #chip-effort, #composer.shell #chip-mode, #composer.shell #attachments { display: none !important; }
 #composer.shell #composer-input { font-family: "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+
+/* Settings → Phone access */
+#remote-pair { display: flex; gap: 14px; align-items: flex-start; margin-top: 4px; }
+#remote-qr { width: 150px; height: 150px; flex: none; border-radius: 8px; background: #fff; padding: 4px; image-rendering: pixelated; }
+.remote-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#remote-code { font: 12px "Cascadia Mono", Consolas, monospace; background: var(--active); border-radius: 6px; padding: 4px 8px; word-break: break-all; user-select: text; }

@@ -305,4 +305,7 @@ ipcMain.handle('providers:bind', (_e, sessionId, providerId, picks) => bind(sess
 ipcMain.handle('providers:rebind', (_e, from, to) => rebind(from, to));
 ipcMain.handle('providers:bindings', () => bindings);
 
-module.exports = { launch, applyEnv, sessionProvider, bind, rebind, homes, writeHome: (id) => find(id) && writeHome(find(id)), homesRoot, has: (id) => !!find(id) };
+// For phones (remote.js): names and emoji icons only.
+const brief = () => providers.map((p) => ({ id: p.id, name: p.name, cli: PROTOCOLS[p.protocol], icon: p.icon?.emoji || null }));
+
+module.exports = { brief, launch, applyEnv, sessionProvider, bind, rebind, homes, writeHome: (id) => find(id) && writeHome(find(id)), homesRoot, has: (id) => !!find(id) };

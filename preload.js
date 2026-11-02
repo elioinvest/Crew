@@ -58,6 +58,17 @@ contextBridge.exposeInMainWorld('api', {
 
   egoStatus: () => ipcRenderer.invoke('ego:status'),
 
+  // Phone access (remote.js)
+  remoteInfo: () => ipcRenderer.invoke('remote:info'),
+  setRemote: (o) => ipcRenderer.invoke('remote:set', o),
+  onRemoteChanged: (cb) => ipcRenderer.on('remote:changed', (_e, info) => cb(info)),
+  onRemoteOpen: (cb) => ipcRenderer.on('remote:open', (_e, req) => cb(req)),
+  onRemoteAsk: (cb) => ipcRenderer.on('remote:ask', (_e, req) => cb(req)),
+  remoteAnswer: (id, data) => ipcRenderer.send('remote:answer', id, data),
+  // Claude's models and their effort levels (claude-models.js)
+  claudeModels: () => ipcRenderer.invoke('claude:models'),
+  refreshClaudeModels: () => ipcRenderer.invoke('claude:models-refresh'),
+
   listProviders: () => ipcRenderer.invoke('providers:list'),
   saveProvider: (p) => ipcRenderer.invoke('providers:save', p),
   deleteProvider: (id) => ipcRenderer.invoke('providers:delete', id),

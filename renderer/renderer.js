@@ -1442,6 +1442,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Labels for the aliases Claude Code writes to settings.json ("model": "opus").
 const CLAUDE_ALIASES = { fable: 'Fable 5.1', opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const codexList = { models: null, at: 0 }; // Codex's models from its app-server (see codexDirectModels)
+// Claude's models and each one's effort levels (claude-models.js: T3 Code's model list).
+let claudeCatalog = null;
+api.claudeModels().then((c) => { claudeCatalog = c; }).catch(() => {});
+// A model as a session or Claude names it ("opus", "claude-opus-5-5", "Opus 5.5") -> its entry.
+// "Default" is the model Claude Code recommends now.
+function claudeModelOf(name) {
+  let m = String(name || '').toLowerCase().replace(/\[1m\]$/, '').replace(/\s*\(default\)$/, '').trim();
+  if (!m || !claudeCatalog) return null;
+  if (/^default\b/.test(m)) m = claudeCatalog.defaultModel || '';
+  return claudeCatalog.models.find((x) => x.slug === m || x.aliases.includes(m) || x.label.toLowerCase() === m || `claude ${x.label.toLowerCase()}` === m) || null;
+}
 const CLAUDE_MODES = [['manual', 'Manual'], ['acceptEdits', 'Accept edits'], ['plan', 'Plan'], ['auto', 'Auto']];
 const MODE_LABELS = {
   manual: 'Manual', default: 'Manual', acceptEdits: 'Accept edits', plan: 'Plan', auto: 'Auto',
@@ -1454,10 +1466,14 @@ const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : '');
 function modelLabel(agent, m) {
   if (!m) return 'Model';
   if (agent === 'codex') {
-    // Session files say "gpt-6-luna"; show it the way Codex's picker spells it ("GPT-6-Luna").
+    // Session files say "gpt-6-luna"; show it the way Codex spells it ("GPT-6-Luna").
+    const direct = codexList.models?.find((x) => x.value.toLowerCase() === m.toLowerCase() || x.label.toLowerCase() === m.toLowerCase());
+    if (direct) return direct.label;
     const known = cachedCodexModels()?.find((x) => x.label.toLowerCase() === m.toLowerCase());
     return known ? known.label : m;
   }
+  const known = claudeModelOf(m);
+  if (known) return known.label;
   if (CLAUDE_ALIASES[m]) return CLAUDE_ALIASES[m];
   const x = m.match(/^claude-([a-z]+)-(\d+)-(\d+)/);
   return x ? `${cap(x[1])} ${x[2]}.${x[3]}` : m;
@@ -1559,28 +1575,65 @@ function renderComposer() {
     $('#composer-send').disabled = !canSend();
     return;
   }
-  const s = currentSettings(entry);
   const codex = entry.agent === 'codex';
   const prov = providerOf(state.active);
   inputEl.placeholder = prov ? `Ask ${prov.name} to do anything` : codex ? 'Ask Codex to do anything' : 'How can I help you today?';
   const proj = findProject(entry.projectPath);
   $('#chip-project').textContent = `${hostNameFor(entry.projectPath) || proj?.name || entry.projectPath.split(/[\\/]/).pop()} ▾`;
-  if (prov) {
-    // A custom provider's session shows its own models and effort, not Claude's or Codex's.
-    const modelId = entry.providerModel || prov.defaultModel;
-    const m = prov.models.find((x) => x.id === modelId);
-    $('#chip-model').textContent = m ? m.name || m.id : modelId || 'Model';
-    $('#chip-effort').textContent = entry.providerEffort ? effortLabel(entry.providerEffort) : 'Effort';
-  } else {
-    $('#chip-model').textContent = modelLabel(entry.agent, s.model);
-    $('#chip-effort').textContent = s.effort ? effortLabel(s.effort) : '';
-  }
-  $('#chip-mode').textContent = (codex && entry.codexPermission) || MODE_LABELS[s.mode] || (codex ? 'Permissions' : 'Manual');
+  const chips = chipLabels(entry, state.active);
+  $('#chip-model').textContent = chips.model;
+  $('#chip-effort').textContent = chips.effort;
+  $('#chip-mode').textContent = chips.mode;
   $('#composer-hint').textContent = entry.missingEl ? 'Install the agent above to start this session'
     : entry.installing ? 'Installing…'
       : entry.exited ? 'Session stopped — press Enter to resume it' : '';
   $('#composer-send').disabled = !canSend();
 }
+
+// The model, effort and mode chips' text for a session.
+function chipLabels(entry, sessionId) {
+  const s = currentSettings(entry);
+  const codex = entry.agent === 'codex';
+  const prov = providerOf(sessionId);
+  let model;
+  let effort;
+  if (prov) {
+    // A custom provider's session shows its own models and effort, not Claude's or Codex's.
+    const modelId = entry.providerModel || prov.defaultModel;
+    const m = prov.models.find((x) => x.id === modelId);
+    model = m ? m.name || m.id : modelId || 'Model';
+    effort = entry.providerEffort ? effortLabel(entry.providerEffort) : 'Effort';
+  } else {
+    model = modelLabel(entry.agent, s.model);
+    effort = s.effort ? effortLabel(s.effort) : '';
+  }
+  return { model, effort, mode: (codex && entry.codexPermission) || MODE_LABELS[s.mode] || (codex ? 'Permissions' : 'Manual') };
+}
+
+// A phone (remote.js) shows a session's chips and opens their menus; the picks run here, as if
+// made in this composer.
+const phoneMenus = new Map();
+let phoneMenuSeq = 0;
+api.onRemoteAsk(async ({ id, what, sessionId, kind, menuId, index }) => {
+  let out = null;
+  try {
+    const entry = sessionId ? state.terms.get(sessionId) : null;
+    if (what === 'chips') out = entry && !entry.exited && entry.agent !== 'ssh' && entry.agent !== 'file' ? chipLabels(entry, sessionId) : null;
+    else if (what === 'menu') {
+      const items = await chipItems(kind, entry, sessionId);
+      if (items?.length) {
+        const mid = ++phoneMenuSeq;
+        phoneMenus.set(mid, items);
+        if (phoneMenus.size > 20) phoneMenus.delete(phoneMenus.keys().next().value);
+        out = { id: mid, items: items.map((it) => ({ label: it.label, hint: it.hint || '', checked: !!it.checked, separator: !!it.separator })) };
+      } else out = { id: 0, items: [], hint: $('#composer-hint').textContent || '' };
+    } else if (what === 'pick') {
+      const it = phoneMenus.get(menuId)?.[index];
+      if (it) { it.action(); out = true; }
+    }
+  } catch { /* answered with null */ }
+  api.remoteAnswer(id, out);
+});
 
 function autosizeInput() {
   inputEl.style.height = 'auto';
@@ -1904,9 +1957,10 @@ function setClaudeMode(entry, target) {
   });
 }
 
-// Codex's /model and /permissions take no arguments: open its picker and hand over to the terminal.
-// Claude's model list isn't stored anywhere readable (it's built into Claude Code and depends on
-// the account), so it's read from Claude's own /model picker, and picks are made in that picker.
+// Switching is one command: Claude Code's /model takes the model's name (/model opus), Codex's
+// takes the model and the effort (/model gpt-… --reasoning=high). Claude's list starts from the
+// standard models; "Refresh model list" reads Claude's own /model picker for the rest (it depends
+// on the account), and a model only that picker knows is picked in it.
 
 const MODEL_CACHE_KEY = 'claudeModels';
 const MODEL_CACHE_MS = 24 * 3600 * 1000;
@@ -2011,39 +2065,90 @@ function selectClaudeModel(entry, model) {
   });
 }
 
-$('#chip-model').addEventListener('click', async (e) => {
-  const entry = activeEntry();
-  if (!entry || entry.exited) return;
-  const prov = providerOf(state.active);
-  if (prov) return providerModelMenu(e, entry, prov);
-  if (entry.agent === 'codex') return codexModelMenu(e, entry);
-  const rect = e.currentTarget.getBoundingClientRect();
-  let models = cachedModels();
-  if (!models) {
-    $('#composer-hint').textContent = 'Reading Claude\'s model list…';
-    models = await loadClaudeModels(entry);
-    renderComposer();
-    if (!models?.length) { $('#composer-hint').textContent = 'Couldn\'t read the model list — try again when Claude is idle'; return; }
+// The chips' menus, as lists of items: the composer shows them under its chips, and a phone shows
+// them as its own menus (remote.js), with the picks made here either way.
+async function chipItems(kind, entry, sessionId) {
+  if (!entry || entry.exited || entry.agent === 'ssh' || entry.agent === 'file') return null;
+  const prov = providerOf(sessionId);
+  if (kind === 'model') return prov ? providerModelItems(entry, prov) : entry.agent === 'codex' ? codexModelItems(entry) : claudeModelItems(entry);
+  if (kind === 'effort') return prov ? providerEffortItems(entry, prov) : entry.agent === 'codex' ? codexEffortItems(entry) : claudeEffortItems(entry);
+  if (kind === 'mode') return entry.agent === 'codex' ? codexPermissionsItems(entry) : claudeModeItems(entry);
+  return null;
+}
+function chipClick(kind) {
+  return async (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const items = await chipItems(kind, activeEntry(), state.active);
+    if (items?.length) showMenu(e, items, rect);
+  };
+}
+$('#chip-model').addEventListener('click', chipClick('model'));
+$('#chip-effort').addEventListener('click', chipClick('effort'));
+$('#chip-mode').addEventListener('click', chipClick('mode'));
+
+// The name /model takes for a row of Claude's list: its alias, "default", or null (picker only).
+function claudeModelArg(label) {
+  if (/^Default/i.test(label)) return 'default';
+  const alias = Object.entries(CLAUDE_ALIASES).find(([, name]) => name.toLowerCase() === String(label).toLowerCase());
+  return alias ? alias[0] : null;
+}
+
+function claudeModelItems(entry) {
+  // The model list: current models, then older ones; each switched with /model <its id>.
+  if (claudeCatalog?.models.length) {
+    // On Default, the Default row is ticked (with the model it stands for), not that model's row.
+    const onDefault = /^default\b/i.test(currentSettings(entry).model || '');
+    const now = onDefault ? null : claudeModelOf(currentSettings(entry).model);
+    const def = claudeModelOf('default');
+    const firstOld = claudeCatalog.models.findIndex((m) => !m.current);
+    return [
+      { label: 'Default (recommended)', hint: def?.label || '', checked: onDefault, action: () => switchClaudeModel(entry, { label: 'Default (recommended)', description: '' }) },
+      ...claudeCatalog.models.map((m, i) => ({
+        label: m.label,
+        hint: i === firstOld ? 'Older models' : '',
+        separator: i === firstOld,
+        checked: m === now,
+        // A current model by its short name (it's saved as the default for new sessions, and
+        // "sonnet" keeps meaning the newest Sonnet); an older one by its full id.
+        action: () => {
+          sendCommand(entry, `/model ${m.current && /^[a-z]+$/.test(m.aliases[0] || '') ? m.aliases[0] : m.slug}`);
+          entry.overrides.model = m.slug;
+          renderComposer();
+        },
+      })),
+      { label: 'Refresh model list', separator: true, action: () => api.refreshClaudeModels().then((c) => { if (c) claudeCatalog = c; }) },
+    ];
   }
+  // Without the list: what Claude's picker listed, once read; until then the standard models.
+  const models = cachedModels() || [{ label: 'Default (recommended)', description: '' }, ...Object.values(CLAUDE_ALIASES).map((label) => ({ label, description: '' }))];
   const current = modelLabel('claude', currentSettings(entry).model);
-  showMenu(e, [
+  return [
     ...models.map((m) => ({
       label: m.label,
       checked: m.label === current,
-      action: () => selectClaudeModel(entry, m),
+      action: () => switchClaudeModel(entry, m),
     })),
     { label: 'Refresh model list', separator: true, action: () => { localStorage.removeItem(MODEL_CACHE_KEY); loadClaudeModels(entry); } },
-  ], rect);
-});
+  ];
+}
+
+function switchClaudeModel(entry, m) {
+  const arg = claudeModelArg(m.label);
+  if (!arg) return selectClaudeModel(entry, m); // only the picker knows this one
+  sendCommand(entry, `/model ${arg}`);
+  // "Default (recommended)" names the model it resolves to in its description.
+  entry.overrides.model = arg === 'default' ? (m.description?.split('·')[0].trim() || 'Default') : m.label;
+  renderComposer();
+}
 
 // A custom provider's models and effort, switched in the running session: Claude Code with
 // /model <id> and /effort <level>; Codex with /model <id> [--reasoning=<level>], which accepts the
 // provider's models because Crew gives Codex a catalog of them (providers.js).
-function providerModelMenu(e, entry, prov) {
+function providerModelItems(entry, prov) {
   const current = entry.providerModel || prov.defaultModel;
-  if (!prov.models.length) { $('#composer-hint').textContent = `No models are listed for ${prov.name}: add them in Settings → Model providers`; return; }
-  showMenu(e, prov.models.map((m) => ({
-    label: m.name && m.name !== m.id ? `${m.name}  ·  ${m.id}` : m.id,
+  if (!prov.models.length) { $('#composer-hint').textContent = `No models are listed for ${prov.name}: add them in Settings → Model providers`; return null; }
+  return prov.models.map((m) => ({
+    label: m.id,
     checked: m.id === current,
     action: () => {
       entry.providerModel = m.id;
@@ -2052,12 +2157,11 @@ function providerModelMenu(e, entry, prov) {
       rememberProviderPicks(entry);
       renderComposer();
     },
-  })), e.currentTarget.getBoundingClientRect());
+  }));
 }
 
 const PROVIDER_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
-function providerEffortMenu(e, entry) {
-  const prov = providerOf(state.active);
+function providerEffortItems(entry, prov) {
   const pick = (lvl) => {
     entry.providerEffort = lvl || undefined;
     if (lvl && entry.agent === 'codex') sendText(entry, `/model ${entry.providerModel || prov?.defaultModel} --reasoning=${lvl}`);
@@ -2065,10 +2169,10 @@ function providerEffortMenu(e, entry) {
     rememberProviderPicks(entry);
     renderComposer();
   };
-  showMenu(e, [
+  return [
     { label: 'Default (the model\'s)', checked: !entry.providerEffort, action: () => pick('') },
     ...PROVIDER_EFFORTS.map((lvl) => ({ label: effortLabel(lvl), checked: entry.providerEffort === lvl, action: () => pick(lvl) })),
-  ], e.currentTarget.getBoundingClientRect());
+  ];
 }
 
 // Keeps a provider session's picks for its next resume.
@@ -2077,30 +2181,28 @@ function rememberProviderPicks(entry) {
   if (id && entry.provider) api.bindProvider(id, entry.provider, { model: entry.providerModel, effort: entry.providerEffort });
 }
 
-$('#chip-effort').addEventListener('click', (e) => {
-  const entry = activeEntry();
-  if (!entry || entry.exited) return;
-  if (providerOf(state.active)) return providerEffortMenu(e, entry);
-  if (entry.agent === 'codex') return codexEffortMenu(e, entry);
+// The levels the session's model has (from the model list), its default marked.
+function claudeEffortItems(entry) {
   const current = currentSettings(entry).effort;
-  showMenu(e, CLAUDE_EFFORTS.map((lvl) => ({
-    label: effortLabel(lvl),
-    checked: lvl === current,
-    action: () => { entry.live.effort = lvl; sendCommand(entry, `/effort ${lvl}`); renderComposer(); },
-  })), e.currentTarget.getBoundingClientRect());
-});
+  const model = claudeModelOf(currentSettings(entry).model);
+  const levels = model ? model.efforts : CLAUDE_EFFORTS.map((id) => ({ id, isDefault: false }));
+  if (!levels.length) { $('#composer-hint').textContent = `${model.label} has no reasoning effort levels`; return null; }
+  return levels.map(({ id, isDefault }) => ({
+    label: effortLabel(id),
+    hint: isDefault ? 'Default' : '',
+    checked: id === current,
+    action: () => { entry.live.effort = id; sendCommand(entry, `/effort ${id}`); renderComposer(); },
+  }));
+}
 
-$('#chip-mode').addEventListener('click', (e) => {
-  const entry = activeEntry();
-  if (!entry || entry.exited) return;
-  if (entry.agent === 'codex') return codexPermissionsMenu(e, entry);
+function claudeModeItems(entry) {
   const current = currentSettings(entry).mode;
-  showMenu(e, CLAUDE_MODES.map(([mode, label]) => ({
+  return CLAUDE_MODES.map(([mode, label]) => ({
     label,
     checked: mode === current || (mode === 'manual' && current === 'default'),
     action: () => setClaudeMode(entry, mode),
-  })), e.currentTarget.getBoundingClientRect());
-});
+  }));
+}
 
 $('#chip-project').addEventListener('click', (e) => {
   const entry = activeEntry();
@@ -2181,10 +2283,10 @@ const CODEX_PERMISSIONS = [
   ['Full Access', 'Use with caution: edits files outside this workspace and uses the internet without asking'],
   ['Read Only', 'Reads workspace files; asks for edits or internet access'],
 ];
-function codexPermissionsMenu(e, entry) {
-  showMenu(e, CODEX_PERMISSIONS.map(([label, hint]) => ({
+function codexPermissionsItems(entry) {
+  return CODEX_PERMISSIONS.map(([label, hint]) => ({
     label, hint, checked: entry.codexPermission === label, action: () => selectCodexPermission(entry, label),
-  })), e.currentTarget.getBoundingClientRect());
+  }));
 }
 
 function selectCodexPermission(entry, label) {
@@ -2280,6 +2382,27 @@ function selectCodex(entry, model, effort) {
   });
 }
 
+// Codex's models and their effort levels, as Codex's app-server lists them (agents.js).
+async function codexDirectModels() {
+  if (codexList.models && Date.now() - codexList.at < 10 * 60e3) return codexList.models;
+  const list = await api.codexModels();
+  if (list?.length) Object.assign(codexList, { models: list, at: Date.now() });
+  return codexList.models;
+}
+function currentCodexDirect(entry, models) {
+  const m = (currentSettings(entry).model || '').toLowerCase();
+  return models.find((x) => x.value.toLowerCase() === m || x.label.toLowerCase() === m) || null;
+}
+function switchCodex(entry, model, effort) {
+  return queue(entry, async () => {
+    sendText(entry, effort ? `/model ${model.value} --reasoning=${effort}` : `/model ${model.value}`);
+    entry.overrides.model = model.value;
+    if (effort) entry.overrides.effort = effort;
+    renderComposer();
+    await sleep(800);
+  });
+}
+
 async function withCodexModels(entry) {
   let models = cachedCodexModels();
   if (models) return models;
@@ -2295,13 +2418,26 @@ function currentCodexModel(entry, models) {
   return models.find((x) => x.label.toLowerCase() === m);
 }
 
-async function codexModelMenu(e, entry) {
-  const rect = e.currentTarget.getBoundingClientRect();
+async function codexModelItems(entry) {
+  const direct = await codexDirectModels();
+  if (direct?.length) {
+    const current = currentCodexDirect(entry, direct);
+    const effortNow = currentSettings(entry).effort;
+    return [
+      ...direct.map((m) => ({
+        label: m.label,
+        checked: m === current,
+        // Keep the current effort if the new model has it, otherwise that model's default.
+        action: () => switchCodex(entry, m, m.efforts.includes(effortNow) ? effortNow : m.defaultEffort || m.efforts[0] || ''),
+      })),
+      { label: 'Refresh model list', separator: true, action: () => { codexList.models = null; codexDirectModels(); } },
+    ];
+  }
   const models = await withCodexModels(entry);
-  if (!models?.length) return;
+  if (!models?.length) return null;
   const current = currentCodexModel(entry, models);
   const effortNow = currentSettings(entry).effort;
-  showMenu(e, [
+  return [
     ...models.map((m) => ({
       label: m.label,
       checked: m === current,
@@ -2310,21 +2446,26 @@ async function codexModelMenu(e, entry) {
         m.efforts.find((x) => codexEffortValue(x.label) === effortNow) || m.efforts.find((x) => x.isDefault) || m.efforts[0]),
     })),
     { label: 'Refresh model list', separator: true, action: () => { localStorage.removeItem(CODEX_CACHE_KEY); loadCodexModels(entry); } },
-  ], rect);
+  ];
 }
 
-async function codexEffortMenu(e, entry) {
-  const rect = e.currentTarget.getBoundingClientRect();
+async function codexEffortItems(entry) {
+  const direct = await codexDirectModels();
+  const now = direct?.length && currentCodexDirect(entry, direct);
+  if (now) {
+    const effortNow = currentSettings(entry).effort;
+    return now.efforts.map((lvl) => ({ label: effortLabel(lvl), checked: lvl === effortNow, action: () => switchCodex(entry, now, lvl) }));
+  }
   const models = await withCodexModels(entry);
-  if (!models?.length) return;
+  if (!models?.length) return null;
   const model = currentCodexModel(entry, models);
-  if (!model) { $('#composer-hint').textContent = 'Current Codex model not found — use Refresh model list'; return; }
+  if (!model) { $('#composer-hint').textContent = 'Current Codex model not found — use Refresh model list'; return null; }
   const effortNow = currentSettings(entry).effort;
-  showMenu(e, model.efforts.map((x) => ({
+  return model.efforts.map((x) => ({
     label: x.label,
     checked: codexEffortValue(x.label) === effortNow,
     action: () => selectCodex(entry, model, x),
-  })), rect);
+  }));
 }
 
 // ---------- usage bar ----------
@@ -2405,3 +2546,39 @@ api.onUsageChanged(() => loadUsage());
   addEventListener('focus', () => loadUsage());
   offerEgoSetup();
 })();
+
+// ---------- phone access (remote.js) ----------
+
+// Settings → Phone access: the switch, and while it's on the pairing QR code, addresses and phones.
+function renderRemote(info) {
+  if (!info) return;
+  $('#cfg-remote').checked = info.enabled;
+  $('#remote-pair').classList.toggle('hidden', !info.enabled);
+  if (!info.enabled) return;
+  $('#remote-qr').src = info.qr || '';
+  $('#remote-code').textContent = info.code;
+  $('#remote-addrs').textContent = info.addresses.length
+    ? info.addresses.map((a) => `${a.address}:${info.port}${a.kind === 'tailscale' ? ' (Tailscale, from anywhere)' : ' (same Wi-Fi)'}`).join('  ·  ')
+    : 'No network address found';
+  $('#remote-devices').textContent = info.devices.length ? `Connected: ${info.devices.join(', ')}` : 'No phone connected';
+  $('#remote-error').textContent = info.error || '';
+}
+$('#cfg-remote').addEventListener('change', async (e) => renderRemote(await api.setRemote({ enabled: e.target.checked })));
+$('#remote-new').addEventListener('click', async () => renderRemote(await api.setRemote({ newToken: true })));
+api.onRemoteChanged(renderRemote);
+$('#btn-settings').addEventListener('click', async () => renderRemote(await api.remoteInfo()));
+
+// A phone asked to open a session: resume it, or start a new one in the project.
+api.onRemoteOpen(({ hostId, terminalOnly, sessionId, projectPath, agent, provider, resume }) => {
+  if (hostId) {
+    const h = hostById(hostId);
+    if (!h) return;
+    if (terminalOnly) showHostTerminal(h);
+    else openHost(h, { session: sessionId ? hostSessions(h).find((x) => x.id === sessionId) || null : null });
+    return;
+  }
+  const p = findProject(projectPath);
+  const s = sessionId && findSession(sessionId);
+  if (resume && s) openSessionRow(p || { path: projectPath }, s);
+  else newSession(projectPath, agent, provider);
+});
