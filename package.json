@@ -1,6 +1,6 @@
 {
   "name": "crew",
-  "version": "2.6.2",
+  "version": "2.6.6",
   "description": "Crew: work with your crew of coding agents (Claude Code and Codex) — projects and sessions, a terminal with a real input box, and a tabbed browser",
   "repository": {
     "type": "git",

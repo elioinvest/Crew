@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="../../renderer/styles.css"></head>
+<body>
+<div id="settings" class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="settings-shell">
+      <aside class="settings-nav">
+        <div class="settings-search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="settings-search" type="text" placeholder="Search" spellcheck="false" />
+        </div>
+        <nav class="settings-nav-list" id="settings-nav-list">
+          <button type="button" class="settings-nav-item on" data-settings-section="general">
+            <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></svg>
+            <span>General</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-settings-section="appearance">
+            <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1.2a1.8 1.8 0 0 0 0-3.6h-.7a1.5 1.5 0 0 1 0-3h2.3A4.2 4.2 0 0 0 19 10.2V9a6 6 0 0 0-7-6Z"/><circle cx="7.5" cy="10" r=".8"/><circle cx="10" cy="6.8" r=".8"/><circle cx="14" cy="6.8" r=".8"/><circle cx="16.5" cy="10" r=".8"/></svg>
+            <span>Appearance</span>
+          </button>
+          <div class="settings-nav-group">Agents</div>
+          <button type="button" class="settings-nav-item" data-settings-section="agents">
+            <svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6"/></svg>
+            <span>Agents</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-settings-section="providers">
+            <svg viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg>
+            <span>Providers</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-settings-section="phone">
+            <svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
+            <span>Phone access</span>
+          </button>
+          <button type="button" class="settings-nav-item" data-settings-section="browser">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+            <span>Browser</span>
+          </button>
+        </nav>
+        <div class="settings-nav-empty hidden" id="settings-nav-empty">No matches</div>
+      </aside>
+      <section class="settings-main">
+        <header class="settings-head">
+          <div class="settings-breadcrumb"><span>Settings</span><span class="settings-crumb-sep">/</span><strong id="settings-title">General</strong></div>
+          <button class="icon-btn" id="settings-close" title="Close (Esc)">
+            <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        </header>
+        <div class="settings-content" id="settings-content">
+          <section class="settings-panel" data-settings-panel="general">
+            <div class="settings-panel-head">
+              <h2>General</h2>
+              <p>Window behavior and how Crew runs in the background.</p>
+            </div>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <label class="settings-row-title" for="cfg-tray">Keep running in the tray when the window is closed</label>
+                  <span class="settings-row-desc">Sessions keep running after you close the window.</span>
+                </div>
+                <label class="settings-toggle" aria-label="Keep running in the tray when the window is closed">
+                  <input id="cfg-tray" type="checkbox" />
+                  <span class="settings-toggle-track"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <label class="settings-row-title" for="cfg-usage">Plan usage</label>
+                  <span class="settings-row-desc">Show plan usage at the bottom. Claude sessions Crew starts get a status line hook that records it.</span>
+                </div>
+                <label class="settings-toggle" aria-label="Show plan usage">
+                  <input id="cfg-usage" type="checkbox" />
+                  <span class="settings-toggle-track"></span>
+                </label>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-settings-panel="appearance">
+            <div class="settings-panel-head">
+              <h2>Appearance</h2>
+              <p>Theme, text size and the interface language.</p>
+            </div>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-theme">Theme</label><span class="settings-row-desc">Light or dark interface.</span></div>
+                <div class="settings-control"><select id="cfg-theme"><option value="light">Light</option><option value="dark">Dark</option></select></div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-font">Font size</label><span class="settings-row-desc">Terminal and editor text size.</span></div>
+                <div class="settings-control number"><input id="cfg-font" type="number" min="9" max="28" /></div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-language">Language</label><span class="settings-row-desc">Interface language. Automatic follows Windows.</span></div>
+                <div class="settings-control"><select id="cfg-language"><option value="auto">Automatic</option><option value="en">English</option><option value="zh">中文</option></select></div>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-settings-panel="agents">
+            <div class="settings-panel-head">
+              <h2>Agents</h2>
+              <p>Commands and arguments for the Claude Code and Codex CLIs.</p>
+            </div>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-command">Claude command</label><span class="settings-row-desc">The Claude Code executable Crew starts.</span></div>
+                <div class="settings-control wide"><input id="cfg-command" type="text" spellcheck="false" /></div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-args">Claude arguments</label><span class="settings-row-desc">Extra arguments passed on every Claude session.</span></div>
+                <div class="settings-control wide"><input id="cfg-args" type="text" spellcheck="false" placeholder="e.g. --model opus" /></div>
+              </div>
+            </div>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-codex-command">Codex command</label><span class="settings-row-desc">The Codex executable Crew starts.</span></div>
+                <div class="settings-control wide"><input id="cfg-codex-command" type="text" spellcheck="false" /></div>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-codex-args">Codex arguments</label><span class="settings-row-desc">Extra arguments passed on every Codex session.</span></div>
+                <div class="settings-control wide"><input id="cfg-codex-args" type="text" spellcheck="false" placeholder="e.g. -m gpt-5.5" /></div>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-settings-panel="providers">
+            <div class="settings-panel-head">
+              <h2>Providers</h2>
+              <p>Your own APIs: relays, self-hosted services and other OpenAI- or Anthropic-compatible endpoints. Each one appears in the New session menus.</p>
+            </div>
+            <div class="settings-card">
+              <div class="settings-provider-head">
+                <span class="settings-row-title">Model providers</span>
+                <button type="button" id="provider-add" class="small-btn">+ Add provider</button>
+              </div>
+              <div id="provider-list"></div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-settings-panel="phone">
+            <div class="settings-panel-head">
+              <h2>Phone access</h2>
+              <p>Use Crew from the Crew app on your phone: see the open sessions, type into them, start sessions and answer approvals. On the same Wi-Fi, or from anywhere through Tailscale.</p>
+            </div>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-text"><label class="settings-row-title" for="cfg-remote">Let paired phones connect</label><span class="settings-row-desc">The pairing code and addresses appear here once enabled.</span></div>
+                <label class="settings-toggle" aria-label="Let paired phones connect"><input id="cfg-remote" type="checkbox" /><span class="settings-toggle-track"></span></label>
+              </div>
+              <div id="remote-pair" class="settings-subcard hidden">
+                <img id="remote-qr" alt="Pairing QR code" />
+                <div class="remote-side">
+                  <span class="field-hint">Scan this code with the phone camera to open Crew in the phone browser (or with the Crew app). Or open the address below in the phone browser and enter the code:</span>
+                  <code id="remote-code"></code>
+                  <span class="ego-line" id="remote-addrs"></span>
+                  <span class="ego-line" id="remote-devices"></span>
+                  <span class="ego-line danger" id="remote-error"></span>
+                  <span class="ego-actions"><button type="button" id="remote-new" class="small-btn" title="Paired phones have to scan the new code">New pairing code</button></span>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel hidden" data-settings-panel="browser">
+            <div class="settings-panel-head">
+              <h2>Browser</h2>
+              <p>ego lite is the browser agents use for anything that needs a browser.</p>
+            </div>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div class="settings-row-text">
+                  <span class="settings-row-title">ego lite: the browser for agents</span>
+                  <span class="ego-line" id="ego-app"></span>
+                  <span class="ego-line" id="ego-skill"></span>
+                  <span class="settings-row-desc">With ego's official skill, agents use ego lite for anything that needs a browser, each in its own Space. When a step needs you (a sign-in, a code), the agent pauses and tells you which Space to open.</span>
+                </div>
+                <div class="ego-actions settings-browser-actions">
+                  <button type="button" id="ego-setup" class="small-btn hidden" title="Opens an agent session with ego's own setup prompt">Set up ego lite</button>
+                  <button type="button" id="ego-check" class="small-btn">Check again</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+        <footer class="settings-foot">
+          <p class="hint">Command and arguments apply to sessions started after saving.</p>
+          <div class="settings-foot-actions">
+            <button id="cfg-cancel" type="button">Cancel</button>
+            <button id="cfg-save" type="button" class="primary">Save</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  </div>
+
+
+<script>
+const section = 'appearance';
+const navs = [...document.querySelectorAll('[data-settings-section]')];
+const panels = [...document.querySelectorAll('[data-settings-panel]')];
+for (const n of navs) n.classList.toggle('on', n.dataset.settingsSection === section);
+for (const p of panels) p.classList.toggle('hidden', p.dataset.settingsPanel !== section);
+const active = navs.find(n => n.dataset.settingsSection === section);
+document.getElementById('settings-title').textContent = active?.querySelector('span')?.textContent || section;
+document.getElementById('cfg-tray').checked = true;
+document.getElementById('cfg-usage').checked = true;
+document.getElementById('cfg-command').value = 'claude';
+document.getElementById('cfg-codex-command').value = 'codex';
+document.getElementById('cfg-theme').value = 'light';
+document.getElementById('cfg-font').value = '14';
+document.getElementById('cfg-language').value = 'auto';
+if (section === 'providers') {
+  document.getElementById('provider-list').innerHTML = '<div class="provider-row"><span class="provider-icon letter" style="background:hsl(210 55% 48%)">D</span><span class="provider-name">DeepSeek Relay</span><span class="provider-meta">OpenAI Responses · 4 models</span><span class="spacer"></span><button class="small-btn">Edit</button><button class="small-btn danger">Delete</button></div><div class="provider-row"><span class="provider-icon letter" style="background:hsl(28 55% 48%)">G</span><span class="provider-name">Gateway</span><span class="provider-meta">Anthropic Messages · 2 models</span><span class="spacer"></span><button class="small-btn">Edit</button><button class="small-btn danger">Delete</button></div>';
+}
+if (section === 'phone') {
+  document.getElementById('cfg-remote').checked = true;
+  document.getElementById('remote-pair').classList.remove('hidden');
+  document.getElementById('remote-code').textContent = '482 917';
+  document.getElementById('remote-addrs').textContent = '192.168.1.23:7788 (same Wi-Fi)';
+  document.getElementById('remote-devices').textContent = 'Connected: iPhone';
+  document.getElementById('remote-qr').src = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="white"/><g fill="#111"><rect x="10" y="10" width="36" height="36"/><rect x="104" y="10" width="36" height="36"/><rect x="10" y="104" width="36" height="36"/><rect x="58" y="58" width="14" height="14"/><rect x="82" y="58" width="14" height="14"/><rect x="58" y="82" width="14" height="14"/><rect x="82" y="82" width="14" height="14"/></g></svg>');
+}
+if (section === 'browser') {
+  document.getElementById('ego-app').textContent = '✓ ego lite is installed';
+  document.getElementById('ego-skill').textContent = '✓ Official skill installed for Claude Code and Codex';
+}
+</script>
+</body></html>

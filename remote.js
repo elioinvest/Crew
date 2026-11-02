@@ -130,7 +130,7 @@ function onData(termId, data) {
     pendingOut.set(termId, (pendingOut.get(termId) || '') + data);
     if (!outTimer) outTimer = setTimeout(flushOut, OUT_EVERY);
   }
-  screenOf(termId)?.write(data);
+  screenOf(termId)?.write(data, () => screenChanged(termId));
   noteActivity(termId);
 }
 
@@ -203,7 +203,7 @@ function onRun(r) {
 const screens = new Map(); // termId -> headless terminal
 function screenOf(termId) {
   const p = deps.ptys.get(termId);
-  if (!p || p.agent === 'ssh') return null;
+  if (!p) return null;
   const cols = p.cols || 120;
   const rows = p.rows || 30;
   let s = screens.get(termId);
@@ -324,6 +324,91 @@ function ensureChatTimer() {
   }, 400);
 }
 
+// ---------- a host's terminal on the phone (the Android app) ----------
+
+// The app shows a host's terminal as its screen: lines of text runs with their colors, sent as
+// the screen changes, with the terminal sized to the phone while it watches (as the web version
+// does it). A run is [text, color or null, bold].
+const BASE16 = ['#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
+  '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff'];
+function palette(i) {
+  if (i < 16) return BASE16[i];
+  if (i < 232) {
+    const n = i - 16;
+    const v = (k) => (k ? 55 + k * 40 : 0).toString(16).padStart(2, '0');
+    return `#${v(Math.floor(n / 36))}${v(Math.floor(n / 6) % 6)}${v(n % 6)}`;
+  }
+  const g = (8 + (i - 232) * 10).toString(16).padStart(2, '0');
+  return `#${g}${g}${g}`;
+}
+function cellColor(cell) {
+  if (cell.isFgDefault()) return null;
+  if (cell.isFgPalette()) return palette(cell.getFgColor());
+  return `#${cell.getFgColor().toString(16).padStart(6, '0')}`;
+}
+function screenRuns(termId, history = 150) {
+  const s = screens.get(termId);
+  if (!s) return { lines: [], cursor: null };
+  const b = s.buffer.active;
+  const cell = b.getNullCell();
+  const lines = [];
+  const first = Math.max(0, b.length - s.rows - history);
+  for (let y = first; y < b.length; y++) {
+    const line = b.getLine(y);
+    const runs = [];
+    if (line) {
+      let text = '';
+      let color = null;
+      let bold = false;
+      for (let x = 0; x < s.cols; x++) {
+        line.getCell(x, cell);
+        if (cell.getWidth() === 0) continue;
+        const c = cellColor(cell);
+        const bd = !!cell.isBold();
+        if (text && (c !== color || bd !== bold)) { runs.push([text, color, bold]); text = ''; }
+        color = c;
+        bold = bd;
+        text += cell.getChars() || ' ';
+      }
+      if (text) runs.push([text, color, bold]);
+      // Trailing blanks carry nothing.
+      while (runs.length && !runs[runs.length - 1][0].trim()) runs.pop();
+      if (runs.length) runs[runs.length - 1][0] = runs[runs.length - 1][0].replace(/\s+$/, '');
+    }
+    lines.push(runs);
+  }
+  // The cursor: its column, and its line within \`lines\`.
+  return { lines, cursor: [b.cursorX, b.baseY + b.cursorY - first] };
+}
+
+const watchDirty = new Set(); // terminals whose screen changed since phones watching them last got it
+let watchTimer = null;
+function pushWatched() {
+  watchTimer = null;
+  for (const c of clients) if (c.watch && watchDirty.has(c.watch)) send(c, { t: 'screen-text', termId: c.watch, ...screenRuns(c.watch) });
+  watchDirty.clear();
+}
+function screenChanged(termId) {
+  if (![...clients].some((c) => c.watch === termId)) return;
+  watchDirty.add(termId);
+  if (!watchTimer) watchTimer = setTimeout(pushWatched, 120);
+}
+function watchTerm(c, termId, cols, rows) {
+  unwatchTerm(c);
+  if (!deps.ptys.get(termId)) { send(c, { t: 'exit', termId, code: null }); return; }
+  c.watch = termId;
+  if (cols && rows) fitToPhone(c, termId, cols, rows);
+  screenOf(termId);
+  // After a resize the shell redraws: send the screen at once, and again once it has.
+  send(c, { t: 'screen-text', termId, ...screenRuns(termId) });
+  setTimeout(() => { if (c.watch === termId) send(c, { t: 'screen-text', termId, ...screenRuns(termId) }); }, 400);
+}
+function unwatchTerm(c) {
+  if (!c.watch) return;
+  release(c, c.watch);
+  c.watch = null;
+}
+
 // ---------- a terminal at the phone's size ----------
 
 // While a phone shows a terminal, the terminal takes the phone's size, so the agent lays its
@@ -422,6 +507,8 @@ function handle(c, m) {
     case 'chat': followChat(c, String(m.sessionId || ''), m.termId || null); break;
     case 'chat-term': if (c.chat) { c.chatTerm = m.termId || null; c.lastScreen = ''; pushScreen(c); } break;
     case 'unchat': unfollowChat(c); break;
+    case 'watch': watchTerm(c, String(m.termId || ''), m.cols, m.rows); break;
+    case 'unwatch': unwatchTerm(c); break;
     case 'chip-menu':
       askWindow({ what: 'menu', sessionId: m.sessionId, kind: m.kind }).then((menu) => send(c, { t: 'chip-menu', reqId: m.reqId, menu }));
       break;
@@ -479,7 +566,7 @@ async function info() {
     enabled, running: !!server?.listening, port: port(), addresses: addrs, error: status.error,
     devices: [...clients].filter((c) => c.ready).map((c) => c.device),
     qr: enabled ? await QRCode.toDataURL(`http://${addrs[0]?.address || '127.0.0.1'}:${port()}/?d=${Buffer.from(JSON.stringify(pair)).toString('base64url')}`, { margin: 1, width: 220 }) : null,
-    code: enabled ? `${addrs[0]?.address || '?'}:${port()} · ${token()}` : '',
+    code: enabled ? token() : '',
   };
 }
 async function notifyWindow() {

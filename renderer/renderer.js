@@ -1083,6 +1083,52 @@ function applyTheme() {
   }
 }
 
+const settingsNavItems = [...document.querySelectorAll('#settings-nav-list [data-settings-section]')];
+const settingsPanels = [...document.querySelectorAll('[data-settings-panel]')];
+
+function showSettingsSection(name) {
+  const item = settingsNavItems.find((x) => x.dataset.settingsSection === name);
+  if (!item) return;
+  for (const nav of settingsNavItems) {
+    const on = nav === item;
+    nav.classList.toggle('on', on);
+    if (on) nav.setAttribute('aria-current', 'page');
+    else nav.removeAttribute('aria-current');
+  }
+  for (const panel of settingsPanels) panel.classList.toggle('hidden', panel.dataset.settingsPanel !== name);
+  $('#settings-title').textContent = item.querySelector('span')?.textContent || name;
+  $('#settings-content').scrollTop = 0;
+}
+
+// The search box filters the navigation by the section title and its settings text.
+function filterSettingsNav() {
+  const q = $('#settings-search').value.trim().toLowerCase();
+  let first = null;
+  for (const item of settingsNavItems) {
+    const panel = settingsPanels.find((p) => p.dataset.settingsPanel === item.dataset.settingsSection);
+    const hay = `${item.textContent} ${panel?.textContent || ''}`.toLowerCase();
+    const match = !q || hay.includes(q);
+    item.classList.toggle('hidden', !match);
+    if (match && !first) first = item;
+  }
+  for (const group of document.querySelectorAll('.settings-nav-group')) {
+    let any = false;
+    for (let n = group.nextElementSibling; n && !n.classList.contains('settings-nav-group'); n = n.nextElementSibling) {
+      if (n.matches('[data-settings-section]') && !n.classList.contains('hidden')) { any = true; break; }
+    }
+    group.classList.toggle('hidden', !any);
+  }
+  $('#settings-nav-empty').classList.toggle('hidden', !!first);
+  if (q && first) {
+    const active = settingsNavItems.find((x) => x.classList.contains('on'));
+    if (!active || active.classList.contains('hidden')) showSettingsSection(first.dataset.settingsSection);
+  }
+}
+
+function closeSettings() {
+  $('#settings').classList.add('hidden');
+}
+
 $('#btn-settings').addEventListener('click', () => {
   $('#cfg-command').value = state.config.claudeCommand;
   $('#cfg-args').value = state.config.extraArgs;
@@ -1095,9 +1141,21 @@ $('#btn-settings').addEventListener('click', () => {
   $('#cfg-usage').checked = state.config.showUsage !== false;
   refreshEgo();
   renderProviderList(); // providers.js
+  $('#settings-search').value = '';
+  filterSettingsNav();
+  showSettingsSection('general');
   $('#settings').classList.remove('hidden');
+  requestAnimationFrame(() => $('#settings-search').focus());
 });
-$('#cfg-cancel').addEventListener('click', () => $('#settings').classList.add('hidden'));
+settingsNavItems.forEach((item) => item.addEventListener('click', () => showSettingsSection(item.dataset.settingsSection)));
+$('#settings-search').addEventListener('input', filterSettingsNav);
+$('#settings-close').addEventListener('click', closeSettings);
+$('#cfg-cancel').addEventListener('click', closeSettings);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || $('#settings').classList.contains('hidden') || e.target.closest?.('select')) return;
+  e.preventDefault();
+  closeSettings();
+});
 $('#cfg-save').addEventListener('click', async () => {
   state.config = await api.setConfig({
     claudeCommand: $('#cfg-command').value.trim() || 'claude',
@@ -1113,7 +1171,7 @@ $('#cfg-save').addEventListener('click', async () => {
   applyLanguage(state.config.language); // i18n.js: reloads in the new language
   applyTheme();
   renderUsage();
-  $('#settings').classList.add('hidden');
+  closeSettings();
 });
 
 // ego lite as the agents' browser: whether it and its official skill are installed (browser.js).
@@ -1128,7 +1186,7 @@ async function refreshEgo() {
   $('#ego-skill').classList.toggle('danger', !s.skill.claude && !s.skill.codex);
   $('#ego-setup').classList.toggle('hidden', s.installed && both);
 }
-$('#ego-setup').addEventListener('click', () => { $('#settings').classList.add('hidden'); setUpEgo(); });
+$('#ego-setup').addEventListener('click', () => { closeSettings(); setUpEgo(); });
 $('#ego-check').addEventListener('click', () => refreshEgo());
 
 // ego's README sets ego lite up by pasting its setup prompt into an agent, which then follows
@@ -1465,7 +1523,9 @@ function modelLabel(agent, m) {
     const direct = codexList.models?.find((x) => x.value.toLowerCase() === m.toLowerCase() || x.label.toLowerCase() === m.toLowerCase());
     if (direct) return direct.label;
     const known = cachedCodexModels()?.find((x) => x.label.toLowerCase() === m.toLowerCase());
-    return known ? known.label : m;
+    if (known) return known.label;
+    // A model Codex no longer lists: spelled as Codex spells names ("gpt-5.6-sol" -> "GPT-5.6-Sol").
+    return /^gpt-/i.test(m) ? m.replace(/^gpt/i, 'GPT').replace(/-([a-z])/g, (_x, c) => `-${c.toUpperCase()}`) : m;
   }
   const known = claudeModelOf(m);
   if (known) return known.label;
@@ -1590,6 +1650,8 @@ function chipLabels(entry, sessionId) {
   const s = currentSettings(entry);
   const codex = entry.agent === 'codex';
   const prov = providerOf(sessionId);
+  // Codex's models by name ("GPT-5.6-Sol", not "gpt-5.6-sol") need its list: fetch it once.
+  if (codex && !prov && !codexList.models) codexDirectModels().then(() => renderComposer()).catch(() => {});
   let model;
   let effort;
   if (prov) {
@@ -1609,11 +1671,29 @@ function chipLabels(entry, sessionId) {
 // made in this composer.
 const phoneMenus = new Map();
 let phoneMenuSeq = 0;
+
+// A session that isn't open here: its chips from what its file saved (and a custom provider's
+// picks), marked closed, since switching needs the running session.
+async function savedChipLabels(sessionId) {
+  const s = findSession(sessionId);
+  if (!s || (s.agent !== 'claude' && s.agent !== 'codex')) return null;
+  const binding = state.bindings[sessionId] || {};
+  const entry = { agent: s.agent, fileSettings: await api.sessionState(sessionId, s.agent), live: {}, overrides: {}, providerModel: binding.model, providerEffort: binding.effort };
+  return { ...chipLabels(entry, sessionId), closed: true };
+}
 api.onRemoteAsk(async ({ id, what, sessionId, kind, menuId, index }) => {
   let out = null;
   try {
     const entry = sessionId ? state.terms.get(sessionId) : null;
-    if (what === 'chips') out = entry && !entry.exited && entry.agent !== 'ssh' && entry.agent !== 'file' ? chipLabels(entry, sessionId) : null;
+    // A Codex session's model is named from Codex's list: give it a moment to load the first time.
+    if (what === 'chips' && !codexList.models && (entry?.agent || findSession(sessionId)?.agent) === 'codex' && !providerOf(sessionId)) {
+      await Promise.race([codexDirectModels().catch(() => {}), sleep(3500)]);
+    }
+    // This window loads a session's saved settings when it's switched to; one the phone asks
+    // about may never have been (a background pane, a session the phone opened): load them now.
+    const running = entry && !entry.exited && (entry.agent === 'claude' || entry.agent === 'codex');
+    if ((what === 'chips' || what === 'menu') && running) await loadSettings(sessionId);
+    if (what === 'chips') out = running ? chipLabels(entry, sessionId) : await savedChipLabels(sessionId);
     else if (what === 'menu') {
       const items = await chipItems(kind, entry, sessionId);
       if (items?.length) {
@@ -2371,7 +2451,9 @@ function selectCodex(entry, model, effort) {
 // Codex's models and their effort levels, as Codex's app-server lists them (agents.js).
 async function codexDirectModels() {
   if (codexList.models && Date.now() - codexList.at < 10 * 60e3) return codexList.models;
-  const list = await api.codexModels();
+  // One fetch at a time: several chips can ask at once.
+  codexList.loading ??= api.codexModels().finally(() => { codexList.loading = null; });
+  const list = await codexList.loading;
   if (list?.length) Object.assign(codexList, { models: list, at: Date.now() });
   return codexList.models;
 }
@@ -2544,7 +2626,7 @@ function renderRemote(info) {
   $('#remote-qr').src = info.qr || '';
   $('#remote-code').textContent = info.code;
   $('#remote-addrs').textContent = info.addresses.length
-    ? info.addresses.map((a) => `${a.address}:${info.port}${a.kind === 'tailscale' ? ' (Tailscale, from anywhere)' : ' (same Wi-Fi)'}`).join('  ·  ')
+    ? info.addresses.map((a) => `${a.address}:${info.port}${a.kind === 'tailscale' ? ' (Tailscale, from anywhere)' : ' (same Wi-Fi)'}`).join('\n')
     : 'No network address found';
   $('#remote-devices').textContent = info.devices.length ? `Connected: ${info.devices.join(', ')}` : 'No phone connected';
   $('#remote-error').textContent = info.error || '';
