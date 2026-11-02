@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Crew" />
+  <title>Crew</title>
+  <link rel="icon" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="vendor/xterm.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Pairing: scan Crew's QR code, or type the address and code. -->
+  <section id="screen-connect" class="screen hidden">
+    <div class="connect">
+      <div class="hero"><img src="icon.svg" alt="" /><h1 data-t="Use Crew from your phone">Use Crew from your phone</h1></div>
+      <p class="lead" data-t="In Crew on your computer, open Settings → Phone access, turn it on, then scan its QR code.">In Crew on your computer, open Settings → Phone access, turn it on, then scan its QR code.</p>
+      <button id="btn-scan" class="pill-btn primary" data-t="Scan QR code">Scan QR code</button>
+      <div class="field-card">
+        <input id="in-host" autocapitalize="off" autocorrect="off" data-tp="Address, like 192.168.1.20:7788" />
+        <input id="in-token" autocapitalize="off" autocorrect="off" data-tp="Pairing code" />
+        <button id="btn-manual" class="pill-btn" data-t="Connect">Connect</button>
+      </div>
+      <p id="connect-status" class="status"></p>
+      <div id="saved"></div>
+    </div>
+  </section>
+
+  <!-- The app: a drawer with the chats, and the current chat (a terminal in Crew) or a new one. -->
+  <section id="screen-main" class="screen hidden">
+    <header class="bar">
+      <button id="btn-drawer" class="icon-btn" aria-label="Chats"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M9.5 4v16"/></svg></button>
+      <h1 id="title"></h1>
+      <button id="btn-keys" class="icon-btn hidden" aria-label="Keys"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 10h.01M11 10h.01M15 10h.01M17 10h.01M7.5 14h9"/></svg></button>
+      <button id="btn-new" class="icon-btn" aria-label="New chat"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v7M8.5 12h7"/></svg></button>
+    </header>
+
+    <main id="body">
+      <!-- A new chat: pick the project and the agent, write the first message. -->
+      <div id="welcome" class="welcome">
+        <div class="hero"><img src="icon.svg" alt="" /><h2 data-t="What are we doing today?">What are we doing today?</h2><span id="computer-tag" class="tag-blue"></span></div>
+      </div>
+      <!-- An open chat: the terminal it runs in. -->
+      <div id="term-view" class="term-view hidden"><div id="term"></div></div>
+      <!-- Agent runs, shown like a trajectory. -->
+      <div id="runs-view" class="runs-view hidden"></div>
+    </main>
+
+    <div id="prompts"></div>
+    <div id="keys" class="keys hidden">
+      <button data-key="esc">Esc</button><button data-key="up">↑</button><button data-key="down">↓</button><button data-key="left">←</button><button data-key="right">→</button>
+      <button data-key="enter">⏎</button><button data-key="tab">Tab</button><button data-key="stab">⇧Tab</button><button data-key="ctrlc">Ctrl+C</button><button data-key="y">y</button><button data-key="n">n</button>
+    </div>
+
+    <div id="composer" class="composer">
+      <textarea id="in-text" rows="1"></textarea>
+      <div class="composer-row">
+        <button id="btn-attach" class="plus" aria-label="Attach"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+        <div id="chips" class="chips"></div>
+        <span id="busy" class="busy hidden"><i></i><span data-t="Working">Working</span></span>
+        <button id="btn-send" class="send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+      </div>
+      <input id="in-file" type="file" multiple class="hidden" />
+    </div>
+  </section>
+
+  <!-- The drawer. -->
+  <div id="scrim" class="scrim hidden"></div>
+  <aside id="drawer" class="drawer">
+    <div class="brand">
+      <img src="icon.svg" alt="" /><b>Crew</b><span class="caps">REMOTE</span>
+      <span class="grow"></span>
+      <button id="btn-drawer-close" class="icon-btn" aria-label="Close"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M9.5 4v16"/></svg></button>
+    </div>
+    <button id="d-new" class="new-chat"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v7M8.5 12h7"/></svg><span data-t="New chat">New chat</span></button>
+    <button id="d-runs" class="d-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span data-t="Agent runs">Agent runs</span><b id="runs-badge" class="count hidden"></b></button>
+    <button id="d-computers" class="d-item"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="11.5" rx="2"/><path d="M8.5 20h7M12 16v4"/></svg><span data-t="Computers">Computers</span></button>
+    <div class="d-section">
+      <span data-t="Projects">Projects</span><span class="grow"></span>
+      <button id="d-search-btn" class="icon-btn small" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg></button>
+    </div>
+    <input id="d-search" class="d-search hidden" type="search" autocapitalize="off" autocorrect="off" data-tp="Search projects and sessions" />
+    <div id="d-list" class="d-list"></div>
+    <div class="d-foot">
+      <span class="conn"><i id="conn-dot" class="dot"></i><span id="conn-name"></span></span>
+      <span class="grow"></span>
+      <button id="d-lang" class="outline-btn"></button>
+    </div>
+  </aside>
+
+  <!-- Menus slide up from the bottom. -->
+  <div id="sheet-scrim" class="scrim hidden"></div>
+  <div id="sheet" class="sheet hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
+  <script src="vendor/addon-webgl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
