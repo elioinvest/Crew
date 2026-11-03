@@ -18,10 +18,11 @@ const ZH = {
   'No projects yet — add a folder with +': '还没有项目——用 + 添加文件夹', 'No sessions yet': '还没有会话', 'No matches': '没有匹配项',
   'Untitled': '未命名', 'Move up': '上移', 'Move down': '下移', 'Move to top': '移到顶部', 'Open folder': '打开文件夹', 'Copy path': '复制路径',
   'Hide from list': '从列表中隐藏', 'Open in Git': '在 Git 中打开', 'Open': '打开', 'Open in split right': '在右侧分屏打开', 'Open in split down': '在下方分屏打开',
-  'Restart': '重启', 'Close': '关闭', 'Rename': '重命名', 'Copy session ID': '复制会话 ID', 'Delete': '删除', 'More': '更多', 'Working': '运行中', 'Idle': '空闲',
+  'Restart': '重启', 'Close': '关闭', 'Rename': '重命名', 'Copy session ID': '复制会话 ID', 'Delete': '删除', 'More': '更多', 'Working': '运行中', 'Working…': '工作中…', 'Idle': '空闲',
   'Fold': '折叠', 'Unfold': '展开',
   'now': '刚刚', 'Active': '当前', 'Double-click to check out': '双击检出', 'Double-click to check out as a local branch': '双击检出为本地分支', 'Click to open its terminal and agent': '点击打开它的终端和智能体',
   // ---------- prompt box and chips ----------
+  "Ask anything. @ files, $ skills, / commands": "问任何事。@ 文件，$ 技能，/ 命令", "Agents, files and folders": "智能体、文件和文件夹", "Commands": "命令", "Skills": "技能", "No matching files or folders.": "没有匹配的文件或文件夹。", "No matching command.": "没有匹配的命令。", "No skills found. Try / to browse commands.": "没有找到技能。输入 / 浏览命令。", "Searching files…": "正在搜索文件…", "Loading skills…": "正在加载技能…", "Personal": "个人", "Project": "项目", "Plugin": "插件", "System": "系统", "Built-in": "内置", "Switch the model": "切换模型", "Set the reasoning effort": "设置推理强度", "Summarize the conversation to free up context": "总结对话以释放上下文", "Start over with an empty conversation": "清空对话重新开始", "Show what fills the context window": "查看上下文占用", "Resume an earlier conversation": "恢复之前的对话", "Go back to an earlier point in the conversation": "回到对话中较早的位置", "Review a pull request": "审查拉取请求", "Review the pending changes for security problems": "检查待提交改动的安全问题", "Write a CLAUDE.md for this project": "为项目生成 CLAUDE.md", "Edit memory files": "编辑记忆文件", "Allow or deny tools": "允许或禁止工具", "Manage subagents": "管理子智能体", "Manage MCP servers": "管理 MCP 服务器", "Manage plugins": "管理插件", "Manage hooks": "管理钩子", "Add a folder Claude can work in": "添加 Claude 可使用的文件夹", "Export the conversation": "导出对话", "Show plan usage limits": "查看套餐用量", "Show this session's cost and duration": "查看本会话的费用和时长", "Show version, model and account": "查看版本、模型和账号", "Open settings": "打开设置", "Check the installation": "检查安装", "Show help": "显示帮助", "Switch the model and reasoning effort": "切换模型和推理强度", "Choose what Codex may do without asking": "设置 Codex 无需询问即可做的事", "Review the current changes": "审查当前改动", "Start a new conversation": "开始新对话", "Show the Git diff": "查看 Git 差异", "Mention a file": "提及文件", "Write an AGENTS.md for this project": "为项目生成 AGENTS.md", "List MCP tools": "列出 MCP 工具", "Show the session's settings and usage": "查看会话设置和用量",
   'How can I help you today?': '今天需要我做什么？', 'Ask Codex to do anything': '让 Codex 做任何事', 'Attach files': '添加文件', 'Send (Enter)': '发送 (Enter)',
   'Model': '模型', 'Effort': '推理强度', 'Permission mode': '权限模式', 'Manual': '手动', 'Accept edits': '自动接受编辑', 'Plan': '计划', 'Auto': '自动',
   'Bypass': '跳过权限', "Don't ask": '不询问', 'Permissions': '权限', 'Untrusted': '不受信任', 'On failure': '失败时', 'On request': '按需', 'Never ask': '从不询问',
@@ -330,7 +331,7 @@ const I18N_SKIP = [
   '.xterm', '.term', 'pre', 'code', 'textarea', 'input', '#head-title', '.git-line', '.git-hunk-head .mono', '.subject', '.git-meta-subject',
   '.git-meta-body', '.git-fname', '.git-fdir', '.git-ref', '.c-author', '.c-hash', '.run-task', '.run-activity', '.run-result', '.ssh-cmd', '.fingerprint',
   '.row-item.session:not(.host-term) .label', '.row-item.project .label', '.host-row .label', '.host-row .meta', '.agent-row .label', '.br-tab .title', '#br-url',
-  '.git-nav-item:not(#git-nav > .git-nav-item) .label', '#git-title', '#git-sub', '.mention-item b', '.host-act code', '.prompt-text.muted',
+  '.git-nav-item:not(#git-nav > .git-nav-item) .label', '#git-title', '#git-sub', '.mention-item b', '.mention-item.own .muted', '.host-act code', '.prompt-text.muted',
 ].join(',');
 
 const i18n = {

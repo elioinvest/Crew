@@ -1,6 +1,6 @@
 /* global api, $, el, showMenu, state, AGENTS, CLAUDE_ALIASES, CLAUDE_EFFORTS, effortLabel, i18n, sessionTitle, toast, confirmBox, field, textInput, openSessionRow, inputEl, autosizeInput */
 // Agents you can @-mention in a session to hand them work: the list in the sidebar and its
-// editor, live cards for their runs, and @ completion in the prompt box. The main agent runs
+// editor, live cards for their runs (@ completion in the prompt box is in suggest.js). The main agent runs
 // them with the crew command (crew.js); agents.js in the main process does the running.
 
 const agentListEl = $('#agent-list');
@@ -287,58 +287,6 @@ setInterval(() => {
     if (r?.status === 'running') { const t = card.querySelector('.run-time'); if (t) t.textContent = runElapsed(r); }
   }
 }, 1000);
-
-// ---------- @ in the prompt box ----------
-
-const mentionPop = $('#mention-pop');
-let mentionState = null; // { start, matches, index }
-
-function mentionAtCaret() {
-  const v = inputEl.value;
-  const caret = inputEl.selectionStart;
-  const m = /(^|[\s(（，,])@([\w-]*)$/.exec(v.slice(0, caret));
-  return m ? { start: caret - m[2].length - 1, query: m[2].toLowerCase(), caret } : null;
-}
-
-function updateMentions() {
-  const at = agentsList.length ? mentionAtCaret() : null;
-  const matches = at ? agentsList.filter((a) => a.name.toLowerCase().includes(at.query)).slice(0, 8) : [];
-  if (!at || !matches.length) { mentionPop.classList.add('hidden'); mentionState = null; return; }
-  mentionState = { ...at, matches, index: Math.min(mentionState?.index || 0, matches.length - 1) };
-  mentionPop.replaceChildren(...matches.map((a, i) => el('div', {
-    class: `mention-item${i === mentionState.index ? ' on' : ''}`,
-    onmousedown: (e) => { e.preventDefault(); pickMention(i); },
-  }, runnerInfo(a.cli).icon(), el('b', {}, `@${a.name}`), el('span', { class: 'muted' }, ` · ${runnerInfo(a.cli).label} · ${{ read: 'reads', edit: 'edits', full: 'full access' }[a.access]}`))));
-  mentionPop.classList.remove('hidden');
-}
-
-function pickMention(i) {
-  const a = mentionState.matches[i];
-  const v = inputEl.value;
-  const before = `${v.slice(0, mentionState.start)}@${a.name} `;
-  inputEl.value = before + v.slice(mentionState.caret);
-  inputEl.selectionStart = inputEl.selectionEnd = before.length;
-  mentionPop.classList.add('hidden');
-  mentionState = null;
-  autosizeInput();
-  inputEl.focus();
-}
-
-inputEl.addEventListener('input', updateMentions);
-inputEl.addEventListener('click', updateMentions);
-inputEl.addEventListener('blur', () => setTimeout(() => mentionPop.classList.add('hidden'), 150));
-// Capture phase on the box, so these keys reach the list before the prompt box sends or moves.
-$('#composer').addEventListener('keydown', (e) => {
-  if (!mentionState || mentionPop.classList.contains('hidden') || e.target !== inputEl) return;
-  const n = mentionState.matches.length;
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') mentionState.index = (mentionState.index + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
-  else if (e.key === 'Enter' || e.key === 'Tab') { pickMention(mentionState.index); }
-  else if (e.key === 'Escape') { mentionPop.classList.add('hidden'); mentionState = null; }
-  else return;
-  e.preventDefault();
-  e.stopPropagation();
-  if (mentionState) updateMentions();
-}, true);
 
 // A message that @-mentions agents gets a short note for the main agent on how to run them.
 function withAgentNote(text) {

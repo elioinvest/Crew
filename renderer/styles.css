@@ -8,6 +8,9 @@
   --border: #ebe8e3;
   --accent: #d97757;
   --running: #3fa45b;
+  --card: #ffffff;
+  --card-shadow: 0 1px 2px rgba(31, 31, 31, .06), 0 0 0 1px rgba(31, 31, 31, .05);
+  --working-bg: rgba(217, 119, 87, .07);
   --term-bg: #ffffff;
   --overlay-w: 140px;
   --statusbar-h: 26px;
@@ -22,6 +25,9 @@
   --active: #333333;
   --border: #2c2c2c;
   --term-bg: #181818;
+  --card: #2b2b2b;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 0 0 1px rgba(255, 255, 255, .06);
+  --working-bg: rgba(217, 119, 87, .10);
 }
 
 * { box-sizing: border-box; }
@@ -85,40 +91,25 @@ body.no-statusbar #statusbar { display: none; }
 .icon-btn.small { padding: 3px; }
 .icon-btn.small svg { width: 15px; height: 15px; }
 
-.search-wrap { padding: 0 4px 6px; }
-#search {
-  width: 100%;
-  border: 1px solid var(--border);
-  background: var(--main-bg);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 7px 10px;
-  outline: none;
-  font: inherit;
+/* The search box and the add-project / new-session / settings buttons beside it (like T3 Code). */
+.side-search { display: flex; align-items: center; gap: 2px; padding: 0 0 8px; flex: none; }
+.search-box {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; color: var(--muted); cursor: text;
 }
-#search:focus { border-color: var(--accent); }
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  background: none;
-  border: 0;
-  padding: 8px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  text-align: left;
-  flex: none;
-}
-.nav-item:hover { background: var(--hover); }
+.search-box:hover { background: var(--hover); }
+.search-box:focus-within { background: var(--main-bg); border-color: var(--border); }
+.search-box svg { width: 17px; height: 17px; }
+#search { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); outline: none; font: inherit; padding: 0; }
+#search::placeholder { color: var(--muted); }
 
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   color: var(--muted);
-  padding: 18px 8px 6px 12px;
+  font-size: 12.5px;
+  padding: 14px 8px 4px 12px;
   flex: none;
 }
 
@@ -152,9 +143,19 @@ body.no-statusbar #statusbar { display: none; }
 .project .chev { color: var(--muted); transition: transform .15s; width: 14px; height: 14px; }
 .project.collapsed .chev { transform: rotate(-90deg); }
 
-.sessions { margin-left: 21px; padding-left: 8px; border-left: 1px solid var(--border); margin-bottom: 4px; }
+.sessions { margin-left: 18px; padding-left: 6px; border-left: 1px solid var(--border); margin-bottom: 6px; }
 .project.collapsed + .sessions { display: none; }
 .session { padding-left: 10px; font-size: 13.5px; }
+/* A session card: title and age on top, the branch (or "Working…") under it. */
+.row-item.session.card { flex-direction: column; align-items: stretch; gap: 2px; padding: 7px 8px 7px 10px; margin: 2px 0; border-radius: 10px; }
+.card-top { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 20px; }
+.card-sub { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--muted); font-size: 12px; }
+.card-sub svg { width: 12px; height: 12px; }
+.card-sub .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-sub.working { color: var(--accent); }
+.row-item.session.working { background: var(--working-bg); }
+.row-item.session.working:hover { background: var(--hover); }
+.row-item.session.active, .row-item.session.active:hover { background: var(--card); box-shadow: var(--card-shadow); }
 .session .dot, .pane-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--running); flex: none; }
 /* An agent mid-task: a spinning ring where the green dot goes. */
 .spinner {
@@ -531,6 +532,9 @@ button.primary:hover { opacity: .85; }
   padding: 4px 8px; color: var(--muted); font-size: 14px; white-space: nowrap;
 }
 .chip.strong { color: var(--text); }
+#chip-model { display: inline-flex; align-items: center; gap: 6px; }
+#chip-model:empty { display: none; }
+#chip-model .agent-badge { width: 14px; height: 14px; }
 .chip:hover { background: var(--hover); }
 .chip:empty { display: none; }
 .menu button.checked::after { content: '✓'; float: right; margin-left: 16px; color: var(--muted); }
@@ -582,7 +586,7 @@ button.primary:hover { opacity: .85; }
 .agent-group .chev { color: var(--muted); transition: transform .15s; width: 13px; height: 13px; }
 .agent-group.collapsed .chev { transform: rotate(-90deg); }
 .agent-group + .session, .agent-group ~ .session { margin-left: 0; }
-.sessions .agent-group ~ .row-item.session { padding-left: 22px; }
+.sessions .agent-group ~ .row-item.session { margin-left: 12px; }
 
 /* ---------- git view ---------- */
 
@@ -935,11 +939,19 @@ body.resizing-x { cursor: col-resize; }
 .run-result { margin: 0; padding: 10px 12px; background: var(--side-bg); border-radius: 8px; font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; max-height: 55vh; overflow: auto; user-select: text; }
 
 .composer-card { position: relative; }
-#mention-pop { position: absolute; left: 12px; bottom: calc(100% + 6px); z-index: 30; min-width: 280px; max-width: 480px; background: var(--main-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .16); padding: 4px; font-size: 13px; }
-.mention-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
-.mention-item .agent-icon { display: inline-flex; }
-.mention-item.on, .mention-item:hover { background: var(--hover); }
-.mention-item .muted { color: var(--muted); }
+/* The prompt box's suggestions (suggest.js): @ agents, files and folders, / commands, $ skills. */
+#mention-pop { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 6px); z-index: 30; background: var(--main-bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 28px rgba(0, 0, 0, .14); padding: 4px; font-size: 12.5px; }
+.sg-head { color: var(--muted); font-size: 11.5px; padding: 6px 10px 4px; }
+.sg-list { max-height: 296px; overflow-y: auto; }
+.sg-empty { color: var(--muted); padding: 6px 10px 10px; }
+.mention-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap; min-width: 0; }
+.mention-item .agent-icon, .mention-item .sg-icon { display: inline-flex; color: var(--muted); flex: none; }
+.mention-item .sg-icon svg, .mention-item .agent-icon svg { width: 15px; height: 15px; }
+.mention-item b { font-weight: 500; flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.mention-item .muted { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mention-item .sg-badge { flex: none; margin-left: auto; color: var(--muted); background: var(--hover); border-radius: 6px; padding: 1px 7px; font-size: 11px; }
+.mention-item.on { background: var(--hover); }
+.mention-item.on .sg-badge { background: var(--active); }
 .field-hint.danger { color: #c4462d; }
 .modal-actions button.primary:disabled { opacity: .4; cursor: default; }
 :root[lang="zh-CN"] .pane.focused .pane-head::after { content: "当前"; }

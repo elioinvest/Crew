@@ -36,6 +36,7 @@ const providers = require('./providers');
 require('./files'); // the file browser beside the terminal
 const remote = require('./remote'); // phone access (the Crew app)
 const claudeModels = require('./claude-models'); // Claude's models and their effort levels, for the chips
+const composerItems = require('./composer'); // the skills and commands the prompt box offers after / and $
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -157,11 +158,13 @@ function readSessionMeta(file) {
   let firstPrompt = null;
   let title = null;
   let customTitle = null;
+  let branch = null;
   try {
     const HEAD = 128 * 1024;
     const headText = readSlice(fd, 0, Math.min(HEAD, st.size));
     for (const o of parseLines(headText, false, st.size > HEAD)) {
       if (!cwd && o.cwd) cwd = o.cwd;
+      if (o.gitBranch) branch = o.gitBranch;
       if (!firstPrompt && o.type === 'user' && o.message && !o.isMeta && !o.isSidechain) {
         const t = cleanPrompt(textOfContent(o.message.content));
         if (t && !t.startsWith('Caveat:')) firstPrompt = t;
@@ -185,8 +188,10 @@ function readSessionMeta(file) {
         if (o.type === 'custom-title' && o.customTitle) customTitle = o.customTitle;
         if (o.type === 'ai-title' && o.aiTitle) title = o.aiTitle;
         if (!cwd && o.cwd) cwd = o.cwd;
+        if (o.gitBranch) branch = o.gitBranch;
       }
     }
+    if (!branch) branch = matchJsonString(headText, /"gitBranch":"((?:[^"\\]|\\.)*)"/);
   } finally {
     fs.closeSync(fd);
   }
@@ -196,6 +201,7 @@ function readSessionMeta(file) {
     agent: 'claude',
     file,
     cwd,
+    branch: branch && branch !== 'HEAD' ? branch : null,
     title: customTitle || title || (firstPrompt ? firstPrompt.slice(0, 80) : null),
     mtime: st.mtimeMs,
     size: st.size,
@@ -237,6 +243,7 @@ function readCodexMeta(file) {
         cwd: matchJsonString(headText, /"cwd":"((?:[^"\\]|\\.)*)"/),
         timestamp: matchJsonString(headText, /"timestamp":"((?:[^"\\]|\\.)*)"/),
         source: src ? (src[2] ?? {}) : undefined,
+        git: { branch: matchJsonString(headText, /"git":\{[^{}]*?"branch":"((?:[^"\\]|\\.)*)"/) },
       };
     }
     // Sub-agent threads (e.g. Guardian reviews) and headless `codex exec` runs aren't conversations to resume.
@@ -246,6 +253,7 @@ function readCodexMeta(file) {
         agent: 'codex',
         file,
         cwd: info.cwd,
+        branch: info.git?.branch || null,
         created: Date.parse(info.timestamp) || st.birthtimeMs,
         firstPrompt: firstPrompt ? cleanPrompt(firstPrompt).slice(0, 80) : null,
         mtime: st.mtimeMs,
@@ -1286,6 +1294,7 @@ app.whenReady().then(() => {
     dataDir: () => app.getPath('userData'),
     claudeVersionArgv: () => { const [file, args] = shellCommand([splitArgs(config.claudeCommand || 'claude')[0] || 'claude', '--version']); return [file, args, { env: cleanEnv(), windowsVerbatimArguments: process.platform === 'win32' }]; },
   });
+  composerItems.init({ shellCommand, cleanEnv, getConfig: () => config, providerHome: (id) => (providers.has(id) ? path.join(providers.homesRoot(), id) : null) });
   remote.init({
     getWin: () => win, ptys, scanProjects, getConfig: () => config,
     setConfig: (patch) => { config = { ...config, ...patch }; saveConfig(config); },

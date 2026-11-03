@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('api', {
   readFile: (root, rel) => ipcRenderer.invoke('files:read', root, rel),
   writeFile: (root, rel, text) => ipcRenderer.invoke('files:write', root, rel, text),
   searchFiles: (root, query, mode) => ipcRenderer.invoke('files:search', root, query, mode),
+  composerItems: (agent, cwd, providerId) => ipcRenderer.invoke('composer:items', agent, cwd, providerId),
   gitIgnore: (root, pattern) => ipcRenderer.invoke('git:ignore', root, pattern),
 
   listHosts: () => ipcRenderer.invoke('hosts:list'),

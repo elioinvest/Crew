@@ -232,34 +232,45 @@ function shiftProject(p, delta) {
   moveProject(p.path, paths[j], delta > 0);
 }
 
+const branchIcon = '<svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg>';
+
+// A session is a card: its title and age, and under them its branch or what it's doing.
 function sessionRow(p, s) {
-  const running = state.terms.has(s.id) && !state.terms.get(s.id).exited;
+  const entry = state.terms.get(s.id);
+  const running = !!entry && !entry.exited;
+  const busy = running && !!entry.busy;
   const row = el('div', {
-    class: `row-item session${state.active === s.id ? ' active' : ''}${leafOf(s.id) ? ' shown' : ''}`,
+    class: `row-item session card${state.active === s.id ? ' active' : ''}${leafOf(s.id) ? ' shown' : ''}${busy ? ' working' : ''}`,
     title: s.title || '',
     onclick: () => state.renaming !== s.id && openSessionRow(p, s),
     ondblclick: () => !s.pending && startRename(s.id),
     oncontextmenu: (e) => { e.preventDefault(); sessionMenu(e, p, s); },
   });
-  if (running) row.append(statusEl(state.terms.get(s.id)));
   if (state.renaming === s.id) {
     row.append(renameInput(s));
     return row;
   }
+  const sub = busy ? el('div', { class: 'card-sub working' }, 'Working…')
+    : s.branch ? el('div', { class: 'card-sub' }, el('span', { html: branchIcon }), el('span', { class: 'label' }, s.branch))
+      : null;
+  const top = el('div', { class: 'card-top' });
+  if (running) top.append(statusEl(entry));
+  row.append(top);
+  if (sub) row.append(sub);
   // Drag a session onto a pane to show it there.
   row.draggable = true;
   row.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData(SESSION_MIME, JSON.stringify({ projectPath: p.path, id: s.id }));
     e.dataTransfer.effectAllowed = 'move';
   });
-  row.append(el('span', { class: 'label' }, s.title || 'Untitled'));
-  row.append(el('span', { class: 'meta' }, s.pending ? '' : relTime(s.mtime)));
+  top.append(el('span', { class: 'label' }, s.title || 'Untitled'));
+  top.append(el('span', { class: 'meta' }, s.pending ? '' : relTime(s.mtime)));
   const actions = el('span', { class: 'actions' });
   if (running) {
     actions.append(el('button', { class: 'icon-btn small', title: 'Close', html: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>', onclick: (e) => { e.stopPropagation(); closeSession(s.id); } }));
   }
   actions.append(el('button', { class: 'icon-btn small', title: 'More', html: icons.dots, onclick: (e) => { e.stopPropagation(); sessionMenu(e, p, s); } }));
-  row.append(actions);
+  top.append(actions);
   return row;
 }
 
@@ -1055,14 +1066,14 @@ $('#btn-add-project').addEventListener('click', async () => {
   if (p) await refresh();
 });
 
-function toggleSearch(force) {
-  const wrap = $('#search-wrap');
-  const show = force ?? wrap.classList.contains('hidden');
-  wrap.classList.toggle('hidden', !show);
-  if (show) $('#search').focus();
-  else { $('#search').value = ''; state.filter = ''; renderSidebar(); }
+// The search box is always shown at the top of the sidebar; Esc clears it.
+function toggleSearch(show) {
+  if (show) { $('#search').focus(); return; }
+  $('#search').value = '';
+  $('#search').blur();
+  state.filter = '';
+  renderSidebar();
 }
-$('#btn-search').addEventListener('click', () => toggleSearch());
 $('#search').addEventListener('input', (e) => { state.filter = e.target.value; renderSidebar(); });
 $('#search').addEventListener('keydown', (e) => { if (e.key === 'Escape') toggleSearch(false); });
 document.addEventListener('keydown', (e) => {
@@ -1630,13 +1641,17 @@ function renderComposer() {
     $('#composer-send').disabled = !canSend();
     return;
   }
-  const codex = entry.agent === 'codex';
-  const prov = providerOf(state.active);
-  inputEl.placeholder = prov ? `Ask ${prov.name} to do anything` : codex ? 'Ask Codex to do anything' : 'How can I help you today?';
+  inputEl.placeholder = 'Ask anything. @ files, $ skills, / commands';
+  if (typeof warmSuggest === 'function') warmSuggest(); // suggest.js
   const proj = findProject(entry.projectPath);
   $('#chip-project').textContent = `${hostNameFor(entry.projectPath) || proj?.name || entry.projectPath.split(/[\\/]/).pop()} ▾`;
   const chips = chipLabels(entry, state.active);
-  $('#chip-model').textContent = chips.model;
+  // The model chip starts with whose model it is: Claude's or OpenAI's mark, or the provider's icon.
+  const prov = providerOf(state.active);
+  $('#chip-model').replaceChildren(...(chips.model ? [
+    prov ? providerIcon(prov) : el('span', { class: 'agent-icon', html: (AGENTS[entry.agent] || AGENTS.claude).badge }),
+    chips.model,
+  ] : []));
   $('#chip-effort').textContent = chips.effort;
   $('#chip-mode').textContent = chips.mode;
   $('#composer-hint').textContent = entry.missingEl ? 'Install the agent above to start this session'
@@ -1798,7 +1813,7 @@ async function submitComposer() {
     const q = /\s/.test(f.path) ? `"${f.path}"` : f.path;
     refs.push(codex ? q : `@${q}`);
   }
-  const body = withAgentNote([refs.join(' '), text].filter(Boolean).join(' ')); // @agents (agents.js)
+  const body = withAgentNote(withSkills(entry, [refs.join(' '), text].filter(Boolean).join(' '))); // $skills (suggest.js), @agents (agents.js)
   if (body) paste(entry, `${files.some((f) => f.isImage) ? ' ' : ''}${body.replace(/\r\n?|\n/g, '\r')}`);
   // An Enter too soon after a long paste counts as part of it (Codex, at least), so wait longer.
   await sleep(files.length ? 300 : body.length > 200 ? 700 : 150);
