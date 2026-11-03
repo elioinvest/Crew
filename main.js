@@ -37,6 +37,7 @@ require('./files'); // the file browser beside the terminal
 const remote = require('./remote'); // phone access (the Crew app)
 const claudeModels = require('./claude-models'); // Claude's models and their effort levels, for the chips
 const composerItems = require('./composer'); // the skills and commands the prompt box offers after / and $
+const images = require('./images'); // the image behind an "[Image #N]" in a terminal
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -314,6 +315,15 @@ function decodeDirName(name) {
 
 function normPath(p) {
   return path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
+}
+
+// A session's transcript file and agent, or null when it isn't on disk (yet).
+function sessionFile(id) {
+  for (const p of scanProjects()) {
+    const s = p.sessions.find((x) => x.id === id);
+    if (s?.file) return { file: s.file, agent: s.agent };
+  }
+  return null;
 }
 
 function scanProjects() {
@@ -1294,13 +1304,14 @@ app.whenReady().then(() => {
     dataDir: () => app.getPath('userData'),
     claudeVersionArgv: () => { const [file, args] = shellCommand([splitArgs(config.claudeCommand || 'claude')[0] || 'claude', '--version']); return [file, args, { env: cleanEnv(), windowsVerbatimArguments: process.platform === 'win32' }]; },
   });
+  images.init({ sessionFile, cacheDir: path.join(app.getPath('userData'), 'image-cache') });
   composerItems.init({ shellCommand, cleanEnv, getConfig: () => config, providerHome: (id) => (providers.has(id) ? path.join(providers.homesRoot(), id) : null) });
   remote.init({
     getWin: () => win, ptys, scanProjects, getConfig: () => config,
     setConfig: (patch) => { config = { ...config, ...patch }; saveConfig(config); },
     sshAnswer: ssh.answerFromPhone, stopRun: (id) => agents.stop(id), hostName: ssh.hostName, attachDir: ATTACH_DIR, providers: providers.brief,
     hosts: ssh.hostsBrief, agents: agents.brief,
-    sessionFile: (id) => { for (const p of scanProjects()) { const s = p.sessions.find((x) => x.id === id); if (s?.file) return { file: s.file, agent: s.agent }; } return null; },
+    sessionFile,
   });
   createTray();
   startWatcher();

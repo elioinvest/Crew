@@ -453,6 +453,7 @@ function makeTermEntry(sessionId, { projectPath, cwd, agent }) {
   // Links open in the side browser; Ctrl+click opens them in the default browser.
   term.loadAddon(new WebLinksAddon.WebLinksAddon((e, uri) => openLink(e, uri)));
   term.registerLinkProvider(fileLinkProvider(term));
+  term.registerLinkProvider(imageLinkProvider(term));
   term.open(container);
 
   const entry = {
@@ -1615,6 +1616,7 @@ function scheduleScreenRead(entry) {
       entry.busy = busy;
       renderSidebar();
       updatePaneHeads();
+      if (state.terms.get(state.active) === entry) updateSend();
     }
     const changed = Object.keys(live).some((k) => live[k] !== entry.live[k]);
     Object.assign(entry.live, live);
@@ -1638,7 +1640,7 @@ function renderComposer() {
     inputEl.placeholder = `Type a command for ${h?.name || 'the server'}`;
     $('#chip-project').textContent = h ? `${h.name} ▾` : '';
     $('#composer-hint').textContent = entry.exited ? 'Disconnected — press Enter to reconnect' : '';
-    $('#composer-send').disabled = !canSend();
+    updateSend();
     return;
   }
   inputEl.placeholder = 'Ask anything. @ files, $ skills, / commands';
@@ -1657,7 +1659,7 @@ function renderComposer() {
   $('#composer-hint').textContent = entry.missingEl ? 'Install the agent above to start this session'
     : entry.installing ? 'Installing…'
       : entry.exited ? 'Session stopped — press Enter to resume it' : '';
-  $('#composer-send').disabled = !canSend();
+  updateSend();
 }
 
 // The model, effort and mode chips' text for a session.
@@ -1728,7 +1730,7 @@ api.onRemoteAsk(async ({ id, what, sessionId, kind, menuId, index }) => {
 function autosizeInput() {
   inputEl.style.height = 'auto';
   inputEl.style.height = `${Math.min(inputEl.scrollHeight, 220)}px`;
-  $('#composer-send').disabled = !canSend();
+  updateSend();
 }
 
 // Bracketed paste, so newlines stay inside the message and "/" doesn't open the command menu
@@ -1786,6 +1788,25 @@ function canSend() {
   return !!inputEl.value.trim() || !!activeEntry()?.attachments.length;
 }
 
+// While the agent works and the box is empty, the send button is a stop button (as in T3 Code):
+// it sends Esc, which interrupts Claude Code and Codex. Typing turns it back into send.
+const SEND_ICON = '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+const STOP_ICON = '<svg class="stop-icon" viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1.5"/></svg>';
+function canStop() {
+  const entry = activeEntry();
+  return !!entry && (entry.agent === 'claude' || entry.agent === 'codex') && !!entry.busy && !entry.exited && !!entry.termId && !canSend();
+}
+function updateSend() {
+  const btn = $('#composer-send');
+  const stop = canStop();
+  if (btn.classList.contains('stop') !== stop) {
+    btn.classList.toggle('stop', stop);
+    btn.innerHTML = stop ? STOP_ICON : SEND_ICON;
+    btn.title = stop ? 'Stop (Esc)' : 'Send (Enter)';
+  }
+  btn.disabled = !stop && !canSend();
+}
+
 const paste = (entry, text) => api.write(entry.termId, `\x1b[200~${text}\x1b[201~`);
 
 async function submitComposer() {
@@ -1813,6 +1834,8 @@ async function submitComposer() {
     const q = /\s/.test(f.path) ? `"${f.path}"` : f.path;
     refs.push(codex ? q : `@${q}`);
   }
+  const sentImages = files.filter((f) => f.isImage).map((f) => f.path);
+  if (sentImages.length) (entry.sentImages ||= []).push(sentImages); // for "[Image #N]" links
   const body = withAgentNote(withSkills(entry, [refs.join(' '), text].filter(Boolean).join(' '))); // $skills (suggest.js), @agents (agents.js)
   if (body) paste(entry, `${files.some((f) => f.isImage) ? ' ' : ''}${body.replace(/\r\n?|\n/g, '\r')}`);
   // An Enter too soon after a long paste counts as part of it (Codex, at least), so wait longer.
@@ -1845,7 +1868,11 @@ inputEl.addEventListener('keydown', (e) => {
     api.write(entry.termId, '\x1b[Z');
   }
 });
-$('#composer-send').addEventListener('click', submitComposer);
+$('#composer-send').addEventListener('click', () => {
+  if (!canStop()) { submitComposer(); return; }
+  api.write(activeEntry().termId, '');
+  inputEl.focus();
+});
 
 // ---------- file links & image viewer ----------
 
@@ -1911,6 +1938,63 @@ function fileLinkProvider(term) {
           text: raw,
           decorations: { underline: true, pointerCursor: true },
           activate: () => openFileLink(raw),
+        });
+      }
+      callback(links.length ? links : undefined);
+    },
+  };
+}
+
+// "[Image #N]": Claude Code and Codex show a pasted image only as this placeholder. Hovering it
+// shows the image and clicking opens it, found in the session's transcript (images.js), or else
+// among the images this box sent.
+const IMAGE_REF_RE = /\[Image #(\d+)\]/g;
+const imagePreview = el('div', { id: 'image-preview', class: 'hidden' }, el('img', { alt: '' }));
+document.body.append(imagePreview);
+let previewFor = null;
+
+async function imageFor(term, n, context) {
+  const [sessionId, entry] = [...state.terms].find(([, e]) => e.term === term) || [];
+  if (!entry) return null;
+  const found = await api.findImage(sessionId, n, context).catch(() => null);
+  if (found) return found;
+  // Not on disk yet: the images sent from here. Claude counts them across the session, Codex
+  // per message (the latest message with that many).
+  const sent = entry.sentImages || [];
+  if (entry.agent === 'codex') return [...sent].reverse().find((m) => m.length >= n)?.[n - 1] || null;
+  return sent.flat()[n - 1] || null;
+}
+
+function imageLinkProvider(term) {
+  return {
+    provideLinks(y, callback) {
+      const { text, pos } = logicalLine(term, y - 1);
+      const links = [];
+      for (const m of text.matchAll(IMAGE_REF_RE)) {
+        const a = pos[m.index];
+        const b = pos[m.index + m[0].length - 1];
+        if (!a || !b || y < a.y || y > b.y) continue;
+        const n = +m[1];
+        const context = text.replace(IMAGE_REF_RE, ' ');
+        links.push({
+          range: { start: { x: a.x, y: a.y }, end: { x: b.x + b.w - 1, y: b.y } },
+          text: m[0],
+          decorations: { underline: true, pointerCursor: true },
+          activate: async () => {
+            const p = await imageFor(term, n, context);
+            if (p) showImage(p); else toast('The image is not in the session yet');
+          },
+          hover: async (e) => {
+            const key = `${n}|${context}`;
+            previewFor = key;
+            const p = await imageFor(term, n, context);
+            if (!p || previewFor !== key) return;
+            imagePreview.firstChild.src = fileUrl(p);
+            imagePreview.style.left = `${Math.min(e.clientX + 12, innerWidth - 300)}px`;
+            imagePreview.style.top = `${Math.max(8, e.clientY - 230)}px`;
+            imagePreview.classList.remove('hidden');
+          },
+          leave: () => { previewFor = null; imagePreview.classList.add('hidden'); },
         });
       }
       callback(links.length ? links : undefined);

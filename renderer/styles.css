@@ -525,6 +525,9 @@ button.primary:hover { opacity: .85; }
 }
 #composer-send svg { width: 17px; height: 17px; stroke-width: 2.2; }
 #composer-send:disabled { opacity: .25; cursor: default; }
+#composer-send.stop { background: #e5484d; color: #fff; box-shadow: 0 1px 2px rgba(229, 72, 77, .25); transition: background .15s; }
+#composer-send.stop:hover { background: #d93d42; }
+#composer-send .stop-icon { width: 12px; height: 12px; fill: currentColor; stroke: none; }
 .composer-meta { display: flex; align-items: center; gap: 2px; padding: 6px 4px 0 10px; }
 .composer-meta .spacer { flex: 1; }
 .chip {
@@ -1357,3 +1360,7 @@ body.git-open #btn-git { color: var(--text); background: var(--active); }
 .remote-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 #remote-code { align-self: flex-start; font: 12px "Cascadia Mono", Consolas, monospace; background: var(--active); border-radius: 6px; padding: 4px 8px; word-break: break-all; user-select: text; }
 #remote-addrs { white-space: pre-line; line-height: 1.6; }
+
+/* The image behind an "[Image #N]" in a terminal, shown while the pointer is on it. */
+#image-preview { position: fixed; z-index: 60; pointer-events: none; padding: 4px; background: var(--main-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+#image-preview img { display: block; max-width: 280px; max-height: 210px; border-radius: 6px; }
