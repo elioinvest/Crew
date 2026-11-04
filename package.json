@@ -1,6 +1,6 @@
 {
   "name": "crew",
-  "version": "2.6.14",
+  "version": "2.6.17",
   "description": "Crew: work with your crew of coding agents (Claude Code and Codex) — projects and sessions, a terminal with a real input box, and a tabbed browser",
   "repository": {
     "type": "git",
@@ -60,6 +60,9 @@
       "composer.js",
       "images.js",
       "worktrees.js",
+      "usage-stats.js",
+      "usage-scan.js",
+      "usage-prices.json",
       "phone/**",
       "codex-prompt.md",
       "renderer/**",

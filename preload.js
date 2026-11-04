@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('api', {
   searchFiles: (root, query, mode) => ipcRenderer.invoke('files:search', root, query, mode),
   composerItems: (agent, cwd, providerId) => ipcRenderer.invoke('composer:items', agent, cwd, providerId),
   findImage: (sessionId, n, context) => ipcRenderer.invoke('images:find', sessionId, n, context),
+  usageStats: (force) => ipcRenderer.invoke('usage-stats:get', force),
+  onUsageStatsChanged: (cb) => ipcRenderer.on('usage-stats:changed', () => cb()),
   gitTrash: (root, rels) => ipcRenderer.invoke('git:trash', root, rels),
   worktreeHead: (cwd) => ipcRenderer.invoke('worktrees:head', cwd),
   worktreesList: (cwd) => ipcRenderer.invoke('worktrees:list', cwd),

@@ -38,6 +38,7 @@ const remote = require('./remote'); // phone access (the Crew app)
 const claudeModels = require('./claude-models'); // Claude's models and their effort levels, for the chips
 const composerItems = require('./composer'); // the skills and commands the prompt box offers after / and $
 const images = require('./images'); // the image behind an "[Image #N]" in a terminal
+const usageStats = require('./usage-stats'); // tokens and estimated cost, for the Usage page
 const worktrees = require('./worktrees'); // more than one checkout of a repository, for sessions side by side
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
@@ -1348,6 +1349,14 @@ app.whenReady().then(() => {
   claudeModels.init({
     dataDir: () => app.getPath('userData'),
     claudeVersionArgv: () => { const [file, args] = shellCommand([splitArgs(config.claudeCommand || 'claude')[0] || 'claude', '--version']); return [file, args, { env: cleanEnv(), windowsVerbatimArguments: process.platform === 'win32' }]; },
+  });
+  usageStats.init({
+    dataDir: () => app.getPath('userData'),
+    roots: () => [
+      ...claudeRoots().map((r) => ({ kind: 'claude', dir: r.dir, provider: r.provider || 'claude' })),
+      ...codexRoots().map((r) => ({ kind: 'codex', dir: path.join(r.home, 'sessions'), provider: r.provider || 'codex' })),
+    ],
+    send: (channel) => { if (win && !win.isDestroyed()) win.webContents.send(channel); },
   });
   worktrees.init({
     runGit,

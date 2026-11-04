@@ -1,6 +1,6 @@
 /* global api, $, el, state, norm, gitDialog, git, gitReload, gitOp, gitBar, forgetRepoRoot, closeGit, openGit, activate, newSession, openSession, findProject, findSession, inputEl, branchMenu, remoteBranchMenu, tagMenu, jumpTo, toast, activeEntry, isHostWorkspace, providerOf, fmtDate, renderSidebar, refresh */
-// The worktree and branch pickers, next to the project chip under the prompt box and on top of
-// the Git panel, like Zed's title bar. Pick or type to create a worktree: it starts on a detached
+// The worktree picker on top of the Git panel and the branch pickers, there and next to the project
+// chip under the prompt box. Pick or type to create a worktree: it starts on a detached
 // HEAD, and the branch picker beside it then creates or checks out the branch to use there. A
 // session belongs to one folder, so "switching" shows that worktree's session or starts one.
 // worktrees.js in the main process does the work.
@@ -382,10 +382,8 @@ async function openBranchPicker(anchor, cwd, { above = false } = {}) {
 // ---------- the chips under the prompt box ----------
 
 const GIT_ICONS = {
-  worktree: '<svg viewBox="0 0 24 24"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>',
   branch: '<svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/></svg>',
 };
-const chipWorktree = $('#chip-worktree');
 const chipBranch = $('#chip-branch');
 let chipSeq = 0;
 
@@ -395,11 +393,8 @@ async function refreshGitChips() {
   const mine = ++chipSeq;
   const head = eligible ? await api.worktreeHead(entry.cwd) : null;
   if (mine !== chipSeq) return;
-  chipWorktree.classList.toggle('hidden', !head);
   chipBranch.classList.toggle('hidden', !head);
   if (!head) return;
-  chipWorktree.replaceChildren(el('span', { class: 'chip-icon', html: GIT_ICONS.worktree }), head.linked ? head.name : T('Main checkout'));
-  chipWorktree.title = head.linked ? `Worktree: ${head.root}` : `Main checkout: ${head.root}`;
   chipBranch.replaceChildren(el('span', { class: 'chip-icon', html: GIT_ICONS.branch }), head.branch || `detached ${head.sha}`);
   chipBranch.title = head.branch ? 'Switch or create a branch' : 'HEAD is detached: pick a branch to work on';
   chipBranch.classList.toggle('detached', !head.branch);
@@ -411,7 +406,6 @@ function renderChipsSoon() {
   chipTimer = setTimeout(refreshGitChips, 50);
 }
 
-chipWorktree.addEventListener('click', () => { const e = activeEntry(); if (e) openWorktreePicker(chipWorktree, e.cwd, { above: true }); });
 chipBranch.addEventListener('click', () => { const e = activeEntry(); if (e) openBranchPicker(chipBranch, e.cwd, { above: true }); });
 // An agent can switch branches on its own. Reading the file is cheap.
 setInterval(() => { if (!document.hidden) refreshGitChips(); }, 5000);
