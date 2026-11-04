@@ -233,9 +233,10 @@ $('#composer').addEventListener('keydown', (e) => {
 // Claude Code expands a skill only when /name opens the message, so the first $skill moves to
 // the front (the rest of the message becomes its arguments) and any others become /name.
 // Codex reads $skill where it stands.
-function withSkills(entry, text) {
+async function withSkills(entry, text) {
   if (entry.agent === 'codex' || !text.includes('$')) return text;
   const c = agentItems(entry);
+  if (!c.data) await c.promise; // the menu never opened, e.g. pasted text
   const names = new Set((c.data?.skills || []).map((s) => s.name));
   if (!names.size) return text;
   let first = null;
@@ -246,10 +247,4 @@ function withSkills(entry, text) {
   });
   if (!first || /^\s*\//.test(text)) return text; // a /command already opens it
   return `/${first} ${body.replace(/[ \t]{2,}/g, ' ').trim()}`.trim();
-}
-
-// Loads the agent's list in the background when a session is shown, so the first / or $ is quick.
-function warmSuggest() {
-  const entry = activeEntry();
-  if (entry && (entry.agent === 'claude' || entry.agent === 'codex')) agentItems(entry);
 }

@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const net = require('net');
 const crypto = require('crypto');
-const { Client, utils: sshUtils } = require('ssh2');
+const ssh2 = () => require('ssh2'); // loaded when a host is first used
 
 const IDLE_MS = 10 * 60e3; // a host's connection closes after this long unused
 const LOG_SIZE = 20; // recent agent commands kept per host
@@ -183,7 +183,7 @@ const knownFile = () => file('ssh-known-hosts.json');
 async function verifyHostKey(h, key, cancelled) {
   const fingerprint = `SHA256:${crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`;
   let type = 'unknown';
-  try { type = sshUtils.parseKey(key)?.type || type; } catch { /* keep "unknown" */ }
+  try { type = ssh2().utils.parseKey(key)?.type || type; } catch { /* keep "unknown" */ }
   const id = `${h.host}:${h.port || 22}`;
   const known = readJson(knownFile(), {});
   const entry = known[id];
@@ -241,7 +241,7 @@ async function authConfig(h) {
     try { key = fs.readFileSync(keyFile); } catch { if (h.auth === 'key') throw new Error(`Can't read the key file ${keyFile}.`); }
     if (key) {
       let passphrase = unseal(secret.passphrase);
-      const parsed = sshUtils.parseKey(key, passphrase || undefined);
+      const parsed = ssh2().utils.parseKey(key, passphrase || undefined);
       if (parsed instanceof Error && /encrypted|passphrase/i.test(parsed.message)) {
         const a = await ask('passphrase', { host: label(h), keyFile }).promise;
         if (!a?.value) throw new Error('No passphrase was given for the key.');
@@ -271,7 +271,7 @@ async function authConfig(h) {
 function connect(h) {
   const existing = pool.get(h.id);
   if (existing) { touch(h.id); return existing.ready; }
-  const client = new Client();
+  const client = new (ssh2().Client)();
   let cancelledFlag = false;
   const entry = { client, timer: null };
   entry.ready = (async () => {

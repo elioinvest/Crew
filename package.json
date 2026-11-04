@@ -1,6 +1,6 @@
 {
   "name": "crew",
-  "version": "2.6.11",
+  "version": "2.6.14",
   "description": "Crew: work with your crew of coding agents (Claude Code and Codex) — projects and sessions, a terminal with a real input box, and a tabbed browser",
   "repository": {
     "type": "git",
@@ -59,11 +59,25 @@
       "claude-models.json",
       "composer.js",
       "images.js",
+      "worktrees.js",
       "phone/**",
       "codex-prompt.md",
       "renderer/**",
-      "!node_modules/node-pty/prebuilds/darwin-*/**",
-      "!node_modules/node-pty/**/*.pdb"
+      "!node_modules/**/*.{map,pdb,iobj,ipdb,lib,exp,tlog,obj,ilk,recipe,lastbuildstate,vcxproj,filters,sln,gyp,gypi,c,cc,cpp,h,hpp,ts,md}",
+      "!node_modules/@xterm/*/lib*/*.mjs",
+      "!node_modules/pngjs/browser.js",
+      "!node_modules/@highlightjs/cdn-assets/**",
+      "node_modules/@highlightjs/cdn-assets/highlight.min.js",
+      "node_modules/@highlightjs/cdn-assets/languages/powershell.min.js",
+      "node_modules/@highlightjs/cdn-assets/languages/dockerfile.min.js",
+      "!node_modules/node-pty/{build,deps,src,scripts,third_party}/**",
+      "!node_modules/node-pty/prebuilds/**",
+      "node_modules/node-pty/prebuilds/win32-${arch}/**"
+    ],
+    "electronLanguages": [
+      "en-US",
+      "zh-CN",
+      "zh-TW"
     ],
     "asarUnpack": [
       "node_modules/node-pty/**"

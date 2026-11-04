@@ -14,9 +14,6 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { WebSocketServer } = require('ws');
-const QRCode = require('qrcode');
-const { Terminal: Headless } = require('@xterm/headless');
 const transcript = require('./transcript');
 
 const BUFFER = 300 * 1024; // recent output kept per terminal, replayed when a phone opens it
@@ -207,7 +204,11 @@ function screenOf(termId) {
   const cols = p.cols || 120;
   const rows = p.rows || 30;
   let s = screens.get(termId);
-  if (!s) { s = new Headless({ cols, rows, scrollback: 300, allowProposedApi: true }); screens.set(termId, s); }
+  if (!s) {
+    const { Terminal: Headless } = require('@xterm/headless'); // loaded with the first terminal
+    s = new Headless({ cols, rows, scrollback: 300, allowProposedApi: true });
+    screens.set(termId, s);
+  }
   if (s.cols !== cols || s.rows !== rows) s.resize(cols, rows);
   return s;
 }
@@ -534,6 +535,7 @@ function start() {
   server = http.createServer((req, res) => {
     try { servePhone(req, res); } catch { res.writeHead(400); res.end(); }
   });
+  const { WebSocketServer } = require('ws'); // phone access is off for most people
   wss = new WebSocketServer({ server, maxPayload: 30 * 1024 * 1024 });
   wss.on('connection', (ws) => {
     const c = { ws, device: '', ready: false, attached: new Set(), sized: new Set() };
@@ -565,7 +567,7 @@ async function info() {
   return {
     enabled, running: !!server?.listening, port: port(), addresses: addrs, error: status.error,
     devices: [...clients].filter((c) => c.ready).map((c) => c.device),
-    qr: enabled ? await QRCode.toDataURL(`http://${addrs[0]?.address || '127.0.0.1'}:${port()}/?d=${Buffer.from(JSON.stringify(pair)).toString('base64url')}`, { margin: 1, width: 220 }) : null,
+    qr: enabled ? await require('qrcode').toDataURL(`http://${addrs[0]?.address || '127.0.0.1'}:${port()}/?d=${Buffer.from(JSON.stringify(pair)).toString('base64url')}`, { margin: 1, width: 220 }) : null,
     code: enabled ? token() : '',
   };
 }

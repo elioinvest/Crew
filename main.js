@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const pty = require('node-pty');
 
 // Earlier versions were called "Claude Terminal" and then "Tandem", and Electron names the data
@@ -38,6 +38,7 @@ const remote = require('./remote'); // phone access (the Crew app)
 const claudeModels = require('./claude-models'); // Claude's models and their effort levels, for the chips
 const composerItems = require('./composer'); // the skills and commands the prompt box offers after / and $
 const images = require('./images'); // the image behind an "[Image #N]" in a terminal
+const worktrees = require('./worktrees'); // more than one checkout of a repository, for sessions side by side
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -370,6 +371,17 @@ function scanProjects() {
   }
   }
 
+  // Sessions in a linked worktree are listed under their repository's project.
+  for (const [key, proj] of [...projects]) {
+    const wt = proj.sessions.length ? worktrees.sessionWorktree(proj.path) : null;
+    if (!wt) continue;
+    projects.delete(key);
+    const mainKey = normPath(wt.main);
+    const main = projects.get(mainKey) || { path: wt.main, name: path.basename(wt.main) || wt.main, sessions: [] };
+    main.sessions.push(...proj.sessions.map((s) => ({ ...s, worktree: wt })));
+    projects.set(mainKey, main);
+  }
+
   for (const p of config.extraProjects) {
     const key = normPath(p);
     if (!projects.has(key)) projects.set(key, { path: p, name: path.basename(p) || p, sessions: [] });
@@ -434,20 +446,38 @@ function splitArgs(s) {
 // Windows only updates an app's PATH when it starts, so a tool installed while Crew is open (e.g.
 // from the install button) wouldn't be found. Re-read the machine and user PATH from the registry.
 function registryPath(key) {
-  const r = spawnSync('reg', ['query', key, '/v', 'Path'], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
-  const m = (r.stdout || '').match(/^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/mi);
+  return parseRegistryPath(spawnSync('reg', ['query', key, '/v', 'Path'], { encoding: 'utf8', windowsHide: true, timeout: 3000 }).stdout);
+}
+
+function parseRegistryPath(stdout) {
+  const m = (stdout || '').match(/^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/mi);
   return m ? m[1].trim().replace(/%([^%]+)%/g, (all, v) => process.env[v] ?? all) : '';
 }
 
-function freshPath() {
+const PATH_KEYS = ['HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'HKCU\\Environment'];
+const PATH_FRESH = 30e3;
+let pathCache = null; // { at, value }
+
+function joinPaths(fromRegistry) {
   const current = process.env.Path || process.env.PATH || '';
-  if (process.platform !== 'win32') return current;
-  const parts = [
-    registryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'),
-    registryPath('HKCU\\Environment'),
-    current,
-  ].join(';').split(';').filter(Boolean);
+  const parts = [...fromRegistry, current].join(';').split(';').filter(Boolean);
   return [...new Map(parts.map((p) => [p.replace(/[\\/]+$/, '').toLowerCase(), p])).values()].join(';');
+}
+
+// Reading the registry starts a process per key, and doing that while something waits freezes all
+// of Crew (terminals too). So only the first read, or one after an install, waits: otherwise the
+// last answer is used, and refreshed in the background once it's old.
+function freshPath({ wait = false } = {}) {
+  if (process.platform !== 'win32') return process.env.Path || process.env.PATH || '';
+  if (wait || !pathCache) {
+    pathCache = { at: Date.now(), value: joinPaths(PATH_KEYS.map(registryPath)) };
+  } else if (Date.now() - pathCache.at > PATH_FRESH) {
+    pathCache.at = Date.now();
+    Promise.all(PATH_KEYS.map((key) => new Promise((resolve) => {
+      execFile('reg', ['query', key, '/v', 'Path'], { encoding: 'utf8', windowsHide: true, timeout: 3000 }, (_e, stdout) => resolve(parseRegistryPath(stdout)));
+    }))).then((found) => { pathCache.value = joinPaths(found); });
+  }
+  return pathCache.value;
 }
 
 function cleanEnv() {
@@ -492,6 +522,7 @@ function commandExists(cmd, env) {
 }
 
 ipcMain.handle('agent:check', (_e, agent) => {
+  freshPath({ wait: true }); // it may have just been installed
   const command = splitArgs(agent === 'codex' ? config.codexCommand || 'codex' : config.claudeCommand || 'claude')[0];
   const env = cleanEnv();
   const info = INSTALL[agent] || INSTALL.claude;
@@ -1101,7 +1132,9 @@ async function refreshUsage(agent, force) {
 
 ipcMain.handle('usage:get', async (_e, force) => {
   if (config.showUsage === false) return {};
-  const pending = [refreshUsage('codex', force), refreshUsage('claude', force)];
+  // The checks start a hidden CLI, so they wait while Crew is in the background.
+  const inFront = win && !win.isDestroyed() && win.isFocused();
+  const pending = force || inFront ? [refreshUsage('codex', force), refreshUsage('claude', force)] : [];
   if (force) await Promise.all(pending);
   return {
     claude: newest(usageCache.claude, claudeUsage()),
@@ -1116,10 +1149,10 @@ ipcMain.handle('usage:get', async (_e, force) => {
 // configured credential helper (Git Credential Manager on Windows) or the command fails.
 const GIT_FLAGS = ['-c', 'core.quotepath=false', '-c', 'color.ui=false', '-c', 'i18n.logOutputEncoding=UTF-8'];
 
-function runGit(cwd, args, input) {
+function runGit(cwd, args, input, extraEnv) {
   return new Promise((resolve) => {
     // GIT_EDITOR=true accepts default messages (merges, reverts) instead of waiting on an editor.
-    const env = { ...cleanEnv(), GIT_TERMINAL_PROMPT: '0', GIT_PAGER: '', GIT_EDITOR: 'true', LC_ALL: 'C.UTF-8' };
+    const env = { ...cleanEnv(), GIT_TERMINAL_PROMPT: '0', GIT_PAGER: '', GIT_EDITOR: 'true', LC_ALL: 'C.UTF-8', ...extraEnv };
     delete env.FORCE_COLOR;
     let child;
     try {
@@ -1148,6 +1181,17 @@ ipcMain.handle('git:root', async (_e, cwd) => {
 ipcMain.handle('git:run', (_e, cwd, args, input) => {
   if (!cwd || !fs.existsSync(cwd) || !Array.isArray(args)) return { code: -1, stdout: '', stderr: 'Repository folder not found.' };
   return runGit(cwd, args.map(String), input);
+});
+
+// Moves files to the Recycle Bin, one by one, and says how many couldn't be.
+ipcMain.handle('git:trash', async (_e, root, rels) => {
+  let failed = 0;
+  for (const rel of rels) {
+    const f = path.join(root, rel);
+    if (path.relative(root, f).startsWith('..')) { failed++; continue; }
+    try { await shell.trashItem(f); } catch { failed++; }
+  }
+  return { failed };
 });
 
 // Appends a pattern to the repository's .gitignore, starting it on a new line.
@@ -1209,6 +1253,7 @@ function createWindow() {
     params.partition = 'persist:browser';
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.on('focus', () => win.webContents.send('usage:changed')); // back in front: check what's due
   win.on('close', (e) => {
     if (quitting || !config.closeToTray) return;
     e.preventDefault();
@@ -1303,6 +1348,12 @@ app.whenReady().then(() => {
   claudeModels.init({
     dataDir: () => app.getPath('userData'),
     claudeVersionArgv: () => { const [file, args] = shellCommand([splitArgs(config.claudeCommand || 'claude')[0] || 'claude', '--version']); return [file, args, { env: cleanEnv(), windowsVerbatimArguments: process.platform === 'win32' }]; },
+  });
+  worktrees.init({
+    runGit,
+    getConfig: () => config,
+    dataDir: () => app.getPath('userData'),
+    send: (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); },
   });
   images.init({ sessionFile, cacheDir: path.join(app.getPath('userData'), 'image-cache') });
   composerItems.init({ shellCommand, cleanEnv, getConfig: () => config, providerHome: (id) => (providers.has(id) ? path.join(providers.homesRoot(), id) : null) });

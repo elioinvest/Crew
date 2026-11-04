@@ -23,6 +23,10 @@ const ZH = {
   'now': '刚刚', 'Active': '当前', 'Double-click to check out': '双击检出', 'Double-click to check out as a local branch': '双击检出为本地分支', 'Click to open its terminal and agent': '点击打开它的终端和智能体',
   // ---------- prompt box and chips ----------
   "Ask anything. @ files, $ skills, / commands": "问任何事。@ 文件，$ 技能，/ 命令", "Agents, files and folders": "智能体、文件和文件夹", "Commands": "命令", "Skills": "技能", "No matching files or folders.": "没有匹配的文件或文件夹。", "No matching command.": "没有匹配的命令。", "No skills found. Try / to browse commands.": "没有找到技能。输入 / 浏览命令。", "Searching files…": "正在搜索文件…", "Loading skills…": "正在加载技能…", "Personal": "个人", "Project": "项目", "Plugin": "插件", "System": "系统", "Built-in": "内置", "Switch the model": "切换模型", "Set the reasoning effort": "设置推理强度", "Summarize the conversation to free up context": "总结对话以释放上下文", "Start over with an empty conversation": "清空对话重新开始", "Show what fills the context window": "查看上下文占用", "Resume an earlier conversation": "恢复之前的对话", "Go back to an earlier point in the conversation": "回到对话中较早的位置", "Review a pull request": "审查拉取请求", "Review the pending changes for security problems": "检查待提交改动的安全问题", "Write a CLAUDE.md for this project": "为项目生成 CLAUDE.md", "Edit memory files": "编辑记忆文件", "Allow or deny tools": "允许或禁止工具", "Manage subagents": "管理子智能体", "Manage MCP servers": "管理 MCP 服务器", "Manage plugins": "管理插件", "Manage hooks": "管理钩子", "Add a folder Claude can work in": "添加 Claude 可使用的文件夹", "Export the conversation": "导出对话", "Show plan usage limits": "查看套餐用量", "Show this session's cost and duration": "查看本会话的费用和时长", "Show version, model and account": "查看版本、模型和账号", "Open settings": "打开设置", "Check the installation": "检查安装", "Show help": "显示帮助", "Switch the model and reasoning effort": "切换模型和推理强度", "Choose what Codex may do without asking": "设置 Codex 无需询问即可做的事", "Review the current changes": "审查当前改动", "Start a new conversation": "开始新对话", "Show the Git diff": "查看 Git 差异", "Mention a file": "提及文件", "Write an AGENTS.md for this project": "为项目生成 AGENTS.md", "List MCP tools": "列出 MCP 工具", "Show the session's settings and usage": "查看会话设置和用量",
+  "Changes": "更改", "Tracked": "已跟踪", "Untracked": "未跟踪", "Staged": "已暂存", "Unstaged": "未暂存", "Conflicts": "冲突", "No changes": "没有更改", "Nothing staged": "没有暂存内容", "No uncommitted changes": "没有未提交的更改", "Commit message": "提交信息", "Commit tracked": "提交已跟踪文件", "Amend": "修改提交", "Uncommit": "撤销提交", "Signoff": "签名 (Signoff)", "Skip hooks": "跳过钩子", "Amend the last commit": "修改上一次提交", "Push after committing": "提交后推送", "Then push": "然后推送", "Publish": "发布", "Force push": "强制推送", "Pull (rebase)": "拉取 (变基)", "Fetch, pull and push": "获取、拉取和推送", "Group by staged and unstaged": "按已暂存和未暂存分组", "Group by tracked and untracked": "按已跟踪和未跟踪分组", "Show as a list": "以列表显示", "Show as a tree": "以树形显示", "Stage all": "全部暂存", "Unstage all": "全部取消暂存", "Stash all": "贮藏全部", "Stash tracked": "贮藏已跟踪", "Stash staged": "贮藏已暂存", "View stashes…": "查看贮藏…", "Apply latest stash": "应用最新贮藏", "Pop latest stash": "弹出最新贮藏", "Merge a branch…": "合并分支…", "Create tag at HEAD…": "在 HEAD 创建标签…", "Open repository folder": "打开仓库文件夹", "Refresh": "刷新", "Restore": "还原", "View file": "查看文件", "View file history": "查看文件历史", "Open file permalink": "打开文件永久链接", "Copy file permalink": "复制文件永久链接", "Ignore this file": "忽略此文件", "Mark resolved": "标记为已解决", "Stage": "暂存", "Unstage": "取消暂存", "Use both": "两者都用", "Show all": "显示全部", "History of ": "文件历史：", "Select a commit": "选择一个提交", "Select a commit to view its changes": "选择提交以查看其更改", "Large diff: the rest is hidden. Show everything": "差异过大，其余部分已隐藏。显示全部", "No conflict markers left in this file.": "此文件已没有冲突标记。", "Binary file: no text diff.": "二进制文件：没有文本差异。", "No content changes.": "内容没有变化。", "Show changes side by side": "并排显示更改", "Show changes inline": "内联显示更改", "Unfold": "展开", "Fold": "折叠", "Copied the link.": "已复制链接。", "Find a stash…": "查找贮藏…", "No stashes yet": "还没有贮藏", "No matches": "没有匹配项", "Apply": "应用", "Pop": "弹出", "Drop": "丢弃", "Select or type to create a worktree…": "选择或输入以创建工作树…", "Select a branch or type to create one…": "选择分支或输入以创建…", "Open in this window": "已在此窗口打开", "Worktrees": "工作树", "Archived": "已归档", "Remote branches": "远程分支", "Branches": "分支", "Tags": "标签", "Folder": "文件夹", "Archive": "归档", "Delete": "删除", "Open the folder": "打开文件夹", "Delete worktree": "删除工作树", "Archive worktree": "归档工作树", "Delete archive": "删除归档", "Force delete": "强制删除", "Save its changes and remove the folder; restore it later": "保存更改并移除文件夹，之后可恢复", "Delete this worktree. Hold Alt to force delete.": "删除此工作树。按住 Alt 强制删除。", "Delete this archive and its saved changes for good": "永久删除此归档及其保存的更改", "Restoring worktree…": "正在恢复工作树…", "Creating worktree…": "正在创建工作树…", "Switch or create a branch": "切换或创建分支", "HEAD is detached: pick a branch to work on": "HEAD 处于分离状态：请选择分支", "Worktree directory": "工作树目录", "Where new worktrees go, relative to the repository. Outside the repository, the project's name is added.": "新工作树的存放位置，相对于仓库。位于仓库外时会加上项目名称。", "Worktree setup command": "工作树初始化命令", "Runs in each new worktree Crew creates, with CREW_WORKTREE_ROOT and CREW_MAIN_GIT_WORKTREE set. For example, copy .env or install dependencies.": "在 Crew 创建的每个新工作树中运行，并设置 CREW_WORKTREE_ROOT 和 CREW_MAIN_GIT_WORKTREE。例如复制 .env 或安装依赖。", "Loading history…": "正在加载历史…", "Move to trash": "移到回收站", "Restore tracked files": "还原已跟踪文件", "Restore hunk": "还原此块",
+  'View Diff': '查看差异', 'Hide Diff': '隐藏差异', 'Stage All': '全部暂存', 'Unstage All': '全部取消暂存', 'Commit Tracked': '提交已跟踪文件', 'Enter commit message': '输入提交信息',
+  'No staged changes yet': '还没有暂存的更改', 'View options': '视图选项', 'Show in history': '在历史中显示', 'Expand commit editor': '展开提交编辑器', 'Fold commit editor': '折叠提交编辑器', 'Show every change': '显示所有更改',
+  'Main checkout': '主检出', 'Files': '文件', 'Deleting…': '正在删除…',
   'How can I help you today?': '今天需要我做什么？', 'Ask Codex to do anything': '让 Codex 做任何事', 'Attach files': '添加文件', 'Send (Enter)': '发送 (Enter)', 'The image is not in the session yet': '这张图片还没有写入会话',
   'Model': '模型', 'Effort': '推理强度', 'Permission mode': '权限模式', 'Manual': '手动', 'Accept edits': '自动接受编辑', 'Plan': '计划', 'Auto': '自动',
   'Bypass': '跳过权限', "Don't ask": '不询问', 'Permissions': '权限', 'Untrusted': '不受信任', 'On failure': '失败时', 'On request': '按需', 'Never ask': '从不询问',
@@ -230,6 +234,15 @@ const ZH_PATTERNS = [
   [/^Saved (.+)$/, (m) => `已保存 ${m[1]}`],
   [/^Couldn't save (.+?): (.*)$/, (m) => `无法保存 ${m[1]}：${m[2]}`],
   [/^Codex doesn't offer "(.+)" here$/, (m) => `Codex 在这里不提供“${m[1]}”`],
+  [/^Worktree (.+) (created|restored|deleted|archived)$/, (m) => `工作树 ${m[1]} 已${{ created: '创建', restored: '恢复', deleted: '删除', archived: '归档' }[m[2]]}`],
+  [/^Creating worktree (.+)…$/, (m) => `正在创建工作树 ${m[1]}…`],
+  [/^Close the session running in (.+) first\.$/, (m) => `请先关闭在 ${m[1]} 中运行的会话。`],
+  [/^Running the setup command in (.+)…$/, (m) => `正在 ${m[1]} 中运行初始化命令…`],
+  [/^Setup finished in (.+)$/, (m) => `${m[1]} 初始化完成`],
+  [/^Use (.+)$/, (m) => `使用 ${m[1]}`],
+  [/^Create "(.+)" based on (.+)$/, (m) => `基于 ${m[2]} 创建“${m[1]}”`],
+  [/^Create branch "(.+)"$/, (m) => `创建分支“${m[1]}”`],
+  [/^Create new worktree based on (.+)$/, (m) => `基于 ${m[1]} 创建新工作树`],
   [/^Ask (.+) to do anything$/, (m) => `让 ${m[1]} 做任何事`],
   [/^Model (\d+): the model ID can't be empty\.$/, (m) => `模型 ${m[1]}：模型 ID 不能为空。`],
   [/^(.+) is in the list twice\.$/, (m) => `${m[1]} 在列表中出现了两次。`],
@@ -331,7 +344,7 @@ const I18N_SKIP = [
   '.xterm', '.term', 'pre', 'code', 'textarea', 'input', '#head-title', '.git-line', '.git-hunk-head .mono', '.subject', '.git-meta-subject',
   '.git-meta-body', '.git-fname', '.git-fdir', '.git-ref', '.c-author', '.c-hash', '.run-task', '.run-activity', '.run-result', '.ssh-cmd', '.fingerprint',
   '.row-item.session:not(.host-term) .label', '.row-item.project .label', '.host-row .label', '.host-row .meta', '.agent-row .label', '.br-tab .title', '#br-url',
-  '.git-nav-item:not(#git-nav > .git-nav-item) .label', '#git-title', '#git-sub', '.mention-item b', '.mention-item.own .muted', '.host-act code', '.prompt-text.muted',
+  '#git-wt-label', '#git-br-label', '.git-card-name', '#git-log-filter-path', '.git-last-subject', '.picker-row:not(.ours) .picker-label', '.picker-sub', '#chip-worktree', '#chip-branch', '.card-branch', '.card-worktree', '.git-conflict-label', '.git-conflict-code', '.git-conflict-ctx', '.mention-item b', '.mention-item.own .muted', '.host-act code', '.prompt-text.muted',
 ].join(',');
 
 const i18n = {
@@ -367,13 +380,16 @@ function i18nAttrs(el) {
   }
 }
 
+// Whole subtrees that are only data, so large ones aren't walked node by node.
+const I18N_DATA = '.xterm, .term, .git-hunk, .git-row, .git-conflict-code, .git-conflict-ctx';
+
 function i18nWalk(root) {
   if (root.nodeType === 3) { i18nText(root); return; }
   if (root.nodeType !== 1) return;
-  if (root.matches?.('.xterm, .term')) return;
+  if (root.matches?.(I18N_DATA)) return;
   i18nAttrs(root);
   const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.nodeType === 1 && n.matches('.xterm, .term') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    acceptNode: (n) => (n.nodeType === 1 && n.matches(I18N_DATA) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
   for (let n = w.nextNode(); n; n = w.nextNode()) { if (n.nodeType === 3) i18nText(n); else i18nAttrs(n); }
 }

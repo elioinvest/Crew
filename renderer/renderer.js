@@ -112,7 +112,10 @@ function renderSidebar() {
     // New sessions that haven't been written to disk yet go on top.
     const pending = [...state.pendingNew]
       .filter(([id, pn]) => norm(pn.projectPath) === norm(p.path) && !p.sessions.some((s) => s.id === id))
-      .map(([id, pn]) => ({ id, agent: pn.agent, title: sessionTitle(id), mtime: Date.now(), pending: true }));
+      .map(([id, pn]) => ({
+        id, agent: pn.agent, title: sessionTitle(id), mtime: Date.now(), pending: true, cwd: pn.cwd,
+        worktree: pn.cwd && norm(pn.cwd) !== norm(p.path) ? { path: pn.cwd, name: pn.cwd.split(/[\\/]/).filter(Boolean).pop() } : undefined,
+      }));
     sessions = [...pending, ...sessions];
 
     const collapsed = !q && !!state.config.collapsed[p.path];
@@ -250,8 +253,12 @@ function sessionRow(p, s) {
     row.append(renameInput(s));
     return row;
   }
-  const sub = busy ? el('div', { class: 'card-sub working' }, 'Working…')
-    : s.branch ? el('div', { class: 'card-sub' }, el('span', { html: branchIcon }), el('span', { class: 'label' }, s.branch))
+  const place = [
+    s.branch ? el('span', { class: 'card-branch' }, el('span', { html: branchIcon }), el('span', { class: 'label' }, s.branch)) : null,
+    s.worktree ? el('span', { class: `card-worktree${s.worktree.archivedId ? ' archived' : ''}`, title: s.worktree.archivedId ? `Archived worktree: opening restores it. ${s.worktree.path}` : `Worktree: ${s.worktree.path}` }, s.worktree.name) : null,
+  ].filter(Boolean);
+  const sub = busy ? el('div', { class: 'card-sub working' }, 'Working…', ...(s.worktree ? [place[place.length - 1]] : []))
+    : place.length ? el('div', { class: 'card-sub' }, ...place)
       : null;
   const top = el('div', { class: 'card-top' });
   if (running) top.append(statusEl(entry));
@@ -331,6 +338,7 @@ function projectMenu(e, p) {
 function sessionMenu(e, p, s) {
   const items = [
     { label: 'Open', action: () => openSessionRow(p, s) },
+    ...(s.worktree && !s.worktree.archivedId && !s.pending ? [{ label: `Archive worktree ${s.worktree.name}…`, action: () => archiveWorktree(p.path, s.worktree) }] : []),
     { label: 'Open in split right', action: () => openBeside(p, s, 'row') },
     { label: 'Open in split down', action: () => openBeside(p, s, 'column') },
   ];
@@ -411,7 +419,9 @@ function termOptions() {
   };
 }
 
-function openSessionRow(p, s) {
+async function openSessionRow(p, s) {
+  // Its worktree was archived: bring it back first, as the session lives in that folder.
+  if (s.worktree?.archivedId && !state.terms.has(s.id) && !(await restoreWorktree(s.worktree.archivedId))) return;
   const agent = s.agent || state.pendingNew.get(s.id)?.agent || 'claude';
   openSession(p.path, s.id, !s.pending, { agent, cwd: s.cwd });
 }
@@ -438,7 +448,7 @@ async function openSession(projectPath, sessionId, resume, { agent = 'claude', c
   entry.providerModel = resume ? state.bindings[sessionId]?.model : undefined;
   entry.providerEffort = resume ? state.bindings[sessionId]?.effort : undefined;
   activate(sessionId);
-  if (!resume) state.pendingNew.set(sessionId, { projectPath, agent, provider });
+  if (!resume) state.pendingNew.set(sessionId, { projectPath, agent, provider, cwd });
   await respawn(sessionId, resume);
   renderSidebar();
 }
@@ -638,10 +648,10 @@ function recheckAgent(entry) {
   respawn(sessionId, isOnDisk(sessionId));
 }
 
-function newSession(projectPath, agent = state.config.defaultAgent || 'claude', provider = null) {
+function newSession(projectPath, agent = state.config.defaultAgent || 'claude', provider = null, cwd = undefined) {
   if (!provider && agent !== state.config.defaultAgent) api.setConfig({ defaultAgent: agent }).then((c) => { state.config = c; });
   if (!provider) state.config.defaultAgent = agent;
-  openSession(projectPath, crypto.randomUUID(), false, { agent, provider });
+  openSession(projectPath, crypto.randomUUID(), false, { agent, provider, cwd });
 }
 
 // Show a session in the focused pane, or focus the pane already showing it. `focusInput: false`
@@ -1146,6 +1156,8 @@ $('#btn-settings').addEventListener('click', () => {
   $('#cfg-args').value = state.config.extraArgs;
   $('#cfg-codex-command').value = state.config.codexCommand;
   $('#cfg-codex-args').value = state.config.codexArgs;
+  $('#cfg-worktree-dir').value = state.config.worktreeDirectory || '';
+  $('#cfg-worktree-setup').value = state.config.worktreeSetup || '';
   $('#cfg-theme').value = state.config.theme;
   $('#cfg-language').value = state.config.language || 'auto';
   $('#cfg-font').value = state.config.fontSize;
@@ -1174,6 +1186,8 @@ $('#cfg-save').addEventListener('click', async () => {
     extraArgs: $('#cfg-args').value.trim(),
     codexCommand: $('#cfg-codex-command').value.trim() || 'codex',
     codexArgs: $('#cfg-codex-args').value.trim(),
+    worktreeDirectory: $('#cfg-worktree-dir').value.trim(),
+    worktreeSetup: $('#cfg-worktree-setup').value.trim(),
     theme: $('#cfg-theme').value,
     fontSize: Math.min(28, Math.max(9, parseInt($('#cfg-font').value, 10) || 14)),
     closeToTray: $('#cfg-tray').checked,
@@ -1345,12 +1359,12 @@ function renderTabs() {
   }
 }
 
-function newTab(url = HOME_URL, { activate = true } = {}) {
+// lazy: a tab restored from last time, which loads the first time it's shown.
+function newTab(url = HOME_URL, { activate = true, lazy = false } = {}) {
   const view = document.createElement('webview');
   view.setAttribute('partition', 'persist:browser');
   view.setAttribute('allowpopups', '');
-  view.setAttribute('src', url);
-  const t = { id: crypto.randomUUID(), view, url, title: '', favicon: null, ready: false, loading: true };
+  const t = { id: crypto.randomUUID(), view, url, title: '', favicon: null, ready: false, loading: !lazy, lazy };
   const onNav = (e) => {
     t.url = e.url;
     saveTabs();
@@ -1365,6 +1379,8 @@ function newTab(url = HOME_URL, { activate = true } = {}) {
   view.addEventListener('did-stop-loading', () => { t.loading = false; renderTabs(); if (t.id === browser.active) updateNav(); });
   view.addEventListener('dom-ready', () => { t.ready = true; if (t.id === browser.active) updateNav(); });
   browser.tabs.push(t);
+  if (lazy) { view.classList.add('background'); renderTabs(); return t; }
+  view.setAttribute('src', url);
   $('#browser-body').append(view);
   if (activate || !browser.active) switchTab(t.id);
   else { view.classList.add('background'); renderTabs(); }
@@ -1374,6 +1390,13 @@ function newTab(url = HOME_URL, { activate = true } = {}) {
 
 function switchTab(id) {
   browser.active = id;
+  const shown = browser.tabs.find((t) => t.id === id);
+  if (shown?.lazy) {
+    shown.lazy = false;
+    shown.loading = true;
+    shown.view.setAttribute('src', shown.url);
+    $('#browser-body').append(shown.view);
+  }
   for (const t of browser.tabs) t.view.classList.toggle('background', t.id !== id);
   urlEditing = false;
   updateNav();
@@ -1400,7 +1423,8 @@ function openBrowser(url) {
     document.body.classList.add('browser-open');
     localStorage.setItem('browserOpen', '1');
     const saved = savedTabs();
-    saved.urls.forEach((u, i) => newTab(u, { activate: i === saved.active }));
+    const first = saved.urls[saved.active] ? saved.active : 0;
+    saved.urls.forEach((u, i) => newTab(u, { lazy: i !== first }));
   }
   if (url) newTab(url);
 }
@@ -1640,11 +1664,12 @@ function renderComposer() {
     inputEl.placeholder = `Type a command for ${h?.name || 'the server'}`;
     $('#chip-project').textContent = h ? `${h.name} ▾` : '';
     $('#composer-hint').textContent = entry.exited ? 'Disconnected — press Enter to reconnect' : '';
+    if (typeof refreshGitChips === 'function') refreshGitChips(); // worktrees.js hides them here
     updateSend();
     return;
   }
   inputEl.placeholder = 'Ask anything. @ files, $ skills, / commands';
-  if (typeof warmSuggest === 'function') warmSuggest(); // suggest.js
+  if (typeof refreshGitChips === 'function') refreshGitChips(); // worktrees.js
   const proj = findProject(entry.projectPath);
   $('#chip-project').textContent = `${hostNameFor(entry.projectPath) || proj?.name || entry.projectPath.split(/[\\/]/).pop()} ▾`;
   const chips = chipLabels(entry, state.active);
@@ -1836,7 +1861,7 @@ async function submitComposer() {
   }
   const sentImages = files.filter((f) => f.isImage).map((f) => f.path);
   if (sentImages.length) (entry.sentImages ||= []).push(sentImages); // for "[Image #N]" links
-  const body = withAgentNote(withSkills(entry, [refs.join(' '), text].filter(Boolean).join(' '))); // $skills (suggest.js), @agents (agents.js)
+  const body = withAgentNote(await withSkills(entry, [refs.join(' '), text].filter(Boolean).join(' '))); // $skills (suggest.js), @agents (agents.js)
   if (body) paste(entry, `${files.some((f) => f.isImage) ? ' ' : ''}${body.replace(/\r\n?|\n/g, '\r')}`);
   // An Enter too soon after a long paste counts as part of it (Codex, at least), so wait longer.
   await sleep(files.length ? 300 : body.length > 200 ? 700 : 150);
@@ -2373,8 +2398,8 @@ $('#chip-project').addEventListener('click', (e) => {
   const entry = activeEntry();
   if (!entry) return;
   showMenu(e, [
-    { label: 'New Claude session here', action: () => newSession(entry.projectPath, 'claude') },
-    { label: 'New Codex session here', action: () => newSession(entry.projectPath, 'codex') },
+    { label: 'New Claude session here', action: () => newSession(entry.projectPath, 'claude', null, entry.cwd) },
+    { label: 'New Codex session here', action: () => newSession(entry.projectPath, 'codex', null, entry.cwd) },
     { label: 'Open folder', action: () => api.revealProject(entry.cwd) },
     { label: 'Copy path', action: () => navigator.clipboard.writeText(entry.cwd) },
   ], e.currentTarget.getBoundingClientRect());
