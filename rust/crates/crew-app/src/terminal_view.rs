@@ -20,9 +20,34 @@ pub const FONT_FAMILY: &str = "Cascadia Mono";
 const FONT_FALLBACKS: [&str; 3] = ["Consolas", "Microsoft YaHei Mono", "Microsoft YaHei"];
 const LINE_HEIGHT: f32 = 1.15;
 const PADDING_LEFT: f32 = 16.0;
-const PADDING_RIGHT: f32 = 6.0;
+const PADDING_RIGHT: f32 = 12.0;
 const PADDING_TOP: f32 = 10.0;
 const PADDING_BOTTOM: f32 = 6.0;
+const BAR_WIDTH: f32 = 8.0;
+/// A little wider than the bar, so it's easy to take hold of.
+const BAR_REACH: f32 = 12.0;
+const BAR_MARGIN: f32 = 2.0;
+const THUMB_MIN: f32 = 24.0;
+
+/// Where the scrollbar's thumb is in its track, for `rows` lines on screen `offset` lines up from the
+/// bottom of `history` lines above them: (distance from the track's top, height).
+fn thumb_of(track: f32, history: usize, offset: usize, rows: usize) -> Option<(f32, f32)> {
+    if history == 0 || track <= THUMB_MIN {
+        return None;
+    }
+    let height = (track * rows as f32 / (history + rows) as f32).max(THUMB_MIN).min(track);
+    let top = (track - height) * (1. - offset.min(history) as f32 / history as f32);
+    Some((top, height))
+}
+
+/// The offset for the thumb's top at `top`: the way back from [`thumb_of`].
+fn offset_at(top: f32, track: f32, height: f32, history: usize) -> usize {
+    let room = track - height;
+    if room <= 0. {
+        return 0;
+    }
+    ((1. - (top / room).clamp(0., 1.)) * history as f32).round() as usize
+}
 
 fn color(c: u32) -> Hsla {
     rgb(c).into()
@@ -46,6 +71,11 @@ pub struct TerminalView {
     mouse: Option<Point<Pixels>>,
     hover: Option<HoverLink>,
     pressed_link: Option<HoverLink>,
+    /// What the scrollbar shows, from the last drawing: history lines, how far up, lines on screen.
+    scrolled: (usize, usize, usize),
+    /// While dragging the scrollbar: where in the thumb it was taken.
+    bar_grab: Option<f32>,
+    bar_hovered: bool,
 }
 
 /// A link on screen: what it opens, and its cells as (row, first column, column after the last).
@@ -120,6 +150,9 @@ impl TerminalView {
             mouse: None,
             hover: None,
             pressed_link: None,
+            scrolled: (0, 0, 0),
+            bar_grab: None,
+            bar_hovered: false,
         }
     }
 
@@ -173,6 +206,39 @@ impl TerminalView {
         let col = (x as usize).min(cols.saturating_sub(1) as usize);
         let row = (y as usize).min(rows.saturating_sub(1) as usize);
         (col, row, x.fract() >= 0.5)
+    }
+
+    /// The scrollbar's track: its top and height in the window. A program that owns the mouse scrolls
+    /// itself, so there's none then.
+    fn bar_track(&self) -> Option<(f32, f32)> {
+        if self.term.mode().intersects(Mode::MOUSE_MODE) {
+            return None;
+        }
+        Some((f32::from(self.bounds.origin.y) + BAR_MARGIN, f32::from(self.bounds.size.height) - 2. * BAR_MARGIN))
+    }
+
+    fn over_bar(&self, position: Point<Pixels>) -> bool {
+        let right = self.bounds.origin.x + self.bounds.size.width;
+        position.x >= right - px(BAR_REACH) && position.x < right && position.y >= self.bounds.origin.y && position.y < self.bounds.origin.y + self.bounds.size.height
+    }
+
+    /// Takes the scrollbar: by the thumb where it is, or anywhere else to bring the thumb there.
+    fn press_bar(&mut self, y: f32, cx: &mut Context<Self>) -> bool {
+        let Some((top, track)) = self.bar_track() else { return false };
+        let (history, offset, rows) = self.scrolled;
+        let Some((thumb, height)) = thumb_of(track, history, offset, rows) else { return false };
+        let inside = y - top - thumb;
+        self.bar_grab = Some(if (0. ..=height).contains(&inside) { inside } else { height / 2. });
+        self.drag_bar(y, cx);
+        true
+    }
+
+    fn drag_bar(&mut self, y: f32, cx: &mut Context<Self>) {
+        let (Some(grab), Some((top, track))) = (self.bar_grab, self.bar_track()) else { return };
+        let (history, offset, rows) = self.scrolled;
+        let Some((_, height)) = thumb_of(track, history, offset, rows) else { return };
+        self.term.scroll_to(offset_at(y - top - grab, track, height, history));
+        cx.notify();
     }
 
     /// The link under a window position: one a program printed, a web address, a path, an image.
@@ -312,6 +378,10 @@ impl TerminalView {
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        if e.button == MouseButton::Left && self.over_bar(e.position) && self.press_bar(f32::from(e.position.y), cx) {
+            self.pressed_link = None;
+            return;
+        }
         self.pressed_link = if e.button == MouseButton::Left { self.link_at(e.position) } else { None };
         let (col, row, right) = self.cell_at(e.position);
         let mode = self.term.mode();
@@ -334,6 +404,11 @@ impl TerminalView {
 
     fn on_mouse_move(&mut self, e: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.mouse = Some(e.position);
+        let over_bar = self.over_bar(e.position);
+        if over_bar != self.bar_hovered {
+            self.bar_hovered = over_bar;
+            cx.notify();
+        }
         if self.selecting {
             let (col, row, right) = self.cell_at(e.position);
             self.term.update_selection(col, row, right);
@@ -438,7 +513,9 @@ impl Render for TerminalView {
             .on_hover(cx.listener(|v, hovered: &bool, _, cx| {
                 if !*hovered {
                     v.mouse = None;
+                    v.bar_hovered = false;
                     v.refresh_hover(cx);
+                    cx.notify();
                 }
             }))
             .when(self.hover.is_some(), |d| d.cursor_pointer())
@@ -736,7 +813,9 @@ impl Element for TerminalElement {
             v.bounds = bounds;
             v.cell = cell;
             v.term.resize(cols, rows, f32::from(width) as u16, f32::from(height) as u16);
-            v.term.screen()
+            let screen = v.term.screen();
+            v.scrolled = (screen.history, screen.display_offset, screen.rows.len());
+            screen
         });
         let (backgrounds, batches) = batches_of(&screen);
         Prepared { screen, backgrounds, batches, cell, baseline_font: font, font_size, focused, marked, palette }
@@ -791,6 +870,39 @@ impl Element for TerminalElement {
             }
         }
 
+        // The scrollbar, and following the mouse wherever it goes while it's being dragged.
+        {
+            let view = self.view.read(cx);
+            let (history, offset, rows) = view.scrolled;
+            if let Some((top, track)) = view.bar_track() {
+                if let Some((thumb, height)) = thumb_of(track, history, offset, rows) {
+                    let active = view.bar_grab.is_some() || view.bar_hovered;
+                    let x = bounds.origin.x + bounds.size.width - px(BAR_WIDTH + BAR_MARGIN);
+                    let area = Bounds::new(point(x, px(top + thumb)), size(px(BAR_WIDTH), px(height)));
+                    let mut tint = color(p.palette.foreground);
+                    tint.a = if active { 0.42 } else { 0.2 };
+                    window.paint_quad(fill(area, tint).corner_radii(px(BAR_WIDTH / 2.)));
+                }
+            }
+            if view.bar_grab.is_some() {
+                let moving = self.view.clone();
+                window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                    if phase == gpui::DispatchPhase::Bubble {
+                        moving.update(cx, |v, cx| v.drag_bar(f32::from(e.position.y), cx));
+                    }
+                });
+                let letting_go = self.view.clone();
+                window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
+                    if phase == gpui::DispatchPhase::Bubble && e.button == MouseButton::Left {
+                        letting_go.update(cx, |v, cx| {
+                            v.bar_grab = None;
+                            cx.notify();
+                        });
+                    }
+                });
+            }
+        }
+
         // The cursor: solid while focused, an outline otherwise, the composing text over it.
         if let Some((col, row)) = p.screen.cursor {
             if p.screen.cursor_shape != CursorKind::Hidden && p.screen.display_offset == 0 {
@@ -839,5 +951,33 @@ impl Element for TerminalElement {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_scrollbar_follows_the_history() {
+        // Nothing to scroll: no bar.
+        assert_eq!(thumb_of(400., 0, 0, 30), None);
+        // At the bottom the thumb is at the track's end, all the way up at its start.
+        let (top, height) = thumb_of(400., 70, 0, 30).unwrap();
+        assert_eq!((top, height), (280., 120.));
+        assert_eq!(thumb_of(400., 70, 70, 30).unwrap().0, 0.);
+        // A long history still leaves a thumb to take hold of.
+        assert_eq!(thumb_of(400., 10_000, 0, 30).unwrap().1, THUMB_MIN);
+    }
+
+    #[test]
+    fn dragging_comes_back_to_the_same_place() {
+        for offset in [0, 1, 35, 69, 70] {
+            let (top, height) = thumb_of(400., 70, offset, 30).unwrap();
+            assert_eq!(offset_at(top, 400., height, 70), offset);
+        }
+        // Past either end stops there.
+        assert_eq!(offset_at(-50., 400., 120., 70), 70);
+        assert_eq!(offset_at(9000., 400., 120., 70), 0);
     }
 }

@@ -21,6 +21,23 @@ use russh_sftp::protocol::{Data, FileAttributes, Handle, OpenFlags, Status, Stat
 // ---------- the server ----------
 
 #[derive(Clone, Default)]
+/// The crew-cli these tests drive, built once if need be: `cargo test` only builds a package's own programs.
+fn crew_cli() -> std::path::PathBuf {
+    static BUILT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+            build.args(["build", "-p", "crew-cli"]).current_dir(env!("CARGO_MANIFEST_DIR"));
+            if !cfg!(debug_assertions) {
+                build.arg("--release");
+            }
+            let built = build.output().expect("couldn't run cargo");
+            assert!(built.status.success(), "couldn't build crew-cli: {}", String::from_utf8_lossy(&built.stderr));
+            std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("crew-cli.exe")
+        })
+        .clone()
+}
+
 struct Disk(Arc<Mutex<HashMap<String, Vec<u8>>>>);
 
 struct Sftp(Disk);
@@ -212,8 +229,7 @@ impl World {
     }
 
     fn cli_env(&self, tool: &str, args: &[&str], extra: &[(&str, &str)]) -> Output {
-        let exe = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().join("crew-cli.exe");
-        assert!(exe.exists(), "build crew-cli first");
+        let exe = crew_cli();
         Command::new(exe).arg(tool).args(args).env("CREW_SSH_PIPE", &self.env["CREW_SSH_PIPE"]).env("CREW_SSH_TOKEN", &self.env["CREW_SSH_TOKEN"]).env("CREW_SESSION_ID", "session-1").envs(extra.iter().copied()).current_dir(&self.dir).stdin(Stdio::null()).output().unwrap()
     }
 

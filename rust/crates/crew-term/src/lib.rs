@@ -640,6 +640,16 @@ impl Terminal {
         self.shared.changed();
     }
 
+    /// Shows the history this many lines up from the bottom.
+    pub fn scroll_to(&self, offset: usize) {
+        {
+            let mut t = self.term.lock();
+            let delta = offset as i32 - t.grid().display_offset() as i32;
+            t.scroll_display(Scroll::Delta(delta));
+        }
+        self.shared.changed();
+    }
+
     pub fn scroll_to_bottom(&self) {
         self.term.lock().scroll_display(Scroll::Bottom);
         self.shared.changed();
