@@ -20,7 +20,6 @@ use russh_sftp::protocol::{Data, FileAttributes, Handle, OpenFlags, Status, Stat
 
 // ---------- the server ----------
 
-#[derive(Clone, Default)]
 /// The crew-cli these tests drive, built once if need be: `cargo test` only builds a package's own programs.
 fn crew_cli() -> std::path::PathBuf {
     static BUILT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
@@ -37,6 +36,8 @@ fn crew_cli() -> std::path::PathBuf {
         })
         .clone()
 }
+
+#[derive(Clone, Default)]
 
 struct Disk(Arc<Mutex<HashMap<String, Vec<u8>>>>);
 
