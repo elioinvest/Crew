@@ -7,7 +7,7 @@ fn main() {
         return;
     }
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let icon = format!("{manifest}/../../../build/icon.ico").replace('\\', "/");
+    let icon = format!("{manifest}/assets/icon.ico").replace('\\', "/");
     println!("cargo:rerun-if-changed={icon}");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
     let number = |key: &str| std::env::var(key).unwrap();

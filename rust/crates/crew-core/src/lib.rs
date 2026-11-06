@@ -1,5 +1,5 @@
 //! Crew's data and logic, with no UI: config, the environment agents run in, sessions on disk, how
-//! agents start. It reads and writes the same files as the Electron app, so both can be used.
+//! agents start. It keeps its settings and lists in plain files in the data folder.
 
 pub mod agents;
 pub mod browser;

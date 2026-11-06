@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use base64::Engine;
 use serde_json::{Value, json};
 
+mod statusline;
+
 const SSH_HELP: &str = r#"crew-ssh: run commands on the SSH hosts saved in Crew.
 
 Usage:
@@ -359,6 +361,7 @@ fn main() {
     match which.as_str() {
         "ssh" => ssh(args),
         "crew" => crew(args),
+        "statusline" => statusline::run(&args),
         _ => die("crew-cli", "run this through the crew-ssh or crew command."),
     }
 }

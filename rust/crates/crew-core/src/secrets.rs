@@ -1,5 +1,4 @@
-//! Secrets at rest, in the format Electron's safeStorage uses on Windows, so hosts and providers saved
-//! by either app work in both: "v10", a 12-byte nonce, then AES-256-GCM with the key from "Local State"
+//! Secrets at rest, so the hosts and providers already saved keep working: "v10", a 12-byte nonce, then AES-256-GCM with the key from "Local State"
 //! in the data folder, itself protected by Windows data protection for this user.
 
 use std::path::Path;
@@ -70,7 +69,7 @@ fn read_key(dir: &Path) -> Option<Vec<u8>> {
     dpapi::unprotect(wrapped.strip_prefix(DPAPI)?).filter(|k| k.len() == 32)
 }
 
-/// The key, made and saved if this data folder doesn't have one yet (as Electron does on first use).
+/// The key, made and saved if this data folder doesn't have one yet.
 fn key_or_new(dir: &Path) -> Option<Vec<u8>> {
     if let Some(key) = read_key(dir) {
         return Some(key);

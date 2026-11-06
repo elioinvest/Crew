@@ -1,4 +1,4 @@
-//! Prints the scan as JSON, to compare with the Electron app's on the same files.
+//! Prints the scan as JSON, to look at what it finds.
 
 use crew_core::{Config, Paths, providers, scan_projects};
 use serde_json::{Value, json};

@@ -1,5 +1,5 @@
-//! Crew's settings: the same config.json as the Electron app, so the two share them. Keys this
-//! version doesn't know yet are kept, so saving never loses what the other wrote.
+//! Crew's settings, in config.json. Keys this
+//! version doesn't know are kept, so saving never loses them.
 
 use std::path::{Path, PathBuf};
 

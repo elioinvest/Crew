@@ -1,5 +1,5 @@
 //! Settings: the sections on the left, their controls on the right, saved together. Providers are
-//! edited in their own dialog and saved straight away, as in the Electron app.
+//! edited in their own dialog and saved straight away.
 
 use base64::Engine;
 use crew_core::env as crew_env;

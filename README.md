@@ -1,7 +1,7 @@
 🌐 **中文** · [English](README.en.md)
 
 <p align="center">
-  <img src="build/icon.svg" alt="Crew 图标" width="128" height="128">
+  <img src="rust/crates/crew-app/assets/icon.svg" alt="Crew 图标" width="128" height="128">
 </p>
 
 Crew 是一款面向 Claude Code 和 Codex 的 Windows 桌面应用。它按项目组织会话，让官方命令行工具在分屏中并排运行，并提供真正的输入框、一键切换模型和模式、每个智能体的实时状态、内置浏览器和托盘模式。任何历史会话都能一键恢复。
@@ -10,9 +10,9 @@ Crew 不替代这两个工具。每个会话运行的都是官方的 `claude` �
 
 ## 安装
 
-1. 从 [Releases](https://github.com/elioinvest/Crew/releases) 页面下载 `Crew Setup <版本号>.exe`。
-2. 运行安装程序。可以自选安装目录，安装后会添加开始菜单和桌面快捷方式。
-3. 安装程序没有代码签名，Windows SmartScreen 可能提示“未知发布者”。点击 **更多信息**，再点击 **仍要运行**。
+1. 从 [Releases](https://github.com/elioinvest/Crew/releases) 页面下载 `Crew-Rust-<版本>-win-x64.zip`。
+2. 解压到任意位置，并让 `crew.exe` 和 `crew-cli.exe` 保持在同一文件夹。
+3. 运行 `crew.exe`。程序没有代码签名，Windows SmartScreen 可能提示“未知发布者”：点击“更多信息”，再点“仍要运行”。如果使用手机访问，Windows 可能还会询问是否允许通过防火墙。
 
 ### 智能体
 
@@ -134,13 +134,14 @@ Crew 支持中文和英文界面（设置 → 语言）。下文中的按钮和�
 
 ## 从源码构建
 
-需要 Node.js 20 或更高版本。
+需要 Rust（版本固定在 `rust/rust-toolchain.toml` 中）和 Visual Studio C++ 生成工具。
 
 ```
-npm install
-npm start          # 开发模式运行
-npm run dist       # 构建 Windows 安装程序，输出到 release/
+cd rust
+cargo build --release -p crew-app -p crew-cli
 ```
+
+生成的程序是 `target/release` 中的 `crew.exe` 和 `crew-cli.exe`。
 
 ## 许可证
 

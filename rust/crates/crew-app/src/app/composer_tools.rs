@@ -772,7 +772,7 @@ impl CrewApp {
     /// The chips under the prompt box. Sessions on a host's terminal have only its name.
     pub(super) fn render_chips(&self, o: &OpenSession, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let c = self.colors;
-        if o.agent == "ssh" {
+        if o.agent == "ssh" || o.agent == "install" {
             return Vec::new();
         }
         let (model, effort, mode) = self.chip_labels(o);

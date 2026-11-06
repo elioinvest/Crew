@@ -315,6 +315,7 @@ impl CrewApp {
             match o.agent.as_str() {
                 "claude" => "Claude",
                 "codex" => "Codex",
+                "install" => "Installer",
                 _ => "SSH",
             },
             |p| p.name.as_str(),

@@ -1,4 +1,4 @@
-//! The SSH hosts, in the Electron app's hosts.json. Secrets are sealed (secrets.rs) and never leave
+//! The SSH hosts, in hosts.json. Secrets are sealed (secrets.rs) and never leave
 //! this side of the app: the agents reach hosts by name, through crew-ssh.
 
 use std::collections::HashMap;
@@ -108,7 +108,7 @@ pub fn save_all(paths: &Paths, hosts: &[Host]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// For the sidebar: grouped hosts last, each group by name, as in the Electron app.
+/// For the sidebar: grouped hosts last, each group by name.
 pub fn list(paths: &Paths) -> Vec<Host> {
     let mut hosts = load(paths);
     hosts.sort_by(|a, b| (!a.group.is_empty(), &a.group, &a.name).cmp(&(!b.group.is_empty(), &b.group, &b.name)));

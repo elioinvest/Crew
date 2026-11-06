@@ -120,10 +120,10 @@ pub fn refresh_path_now() {
 }
 
 /// What agents and git run with: this process's environment, without what a parent Claude Code
-/// or Electron would leak into them, and with the current PATH.
+/// would leak into them, and with the current PATH.
 pub fn clean_env() -> HashMap<String, String> {
     let mut env: HashMap<String, String> = std::env::vars().collect();
-    env.retain(|k, _| k != "CLAUDECODE" && !k.starts_with("CLAUDE_CODE_") && !k.starts_with("ELECTRON_"));
+    env.retain(|k, _| k != "CLAUDECODE" && !k.starts_with("CLAUDE_CODE_"));
     env.insert("TERM".into(), "xterm-256color".into());
     env.insert("COLORTERM".into(), "truecolor".into());
     env.insert("FORCE_COLOR".into(), "3".into());
@@ -142,8 +142,7 @@ pub fn command_exists(cmd: &str) -> bool {
     hide(&mut c).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
-/// Splits a line of arguments: spaces separate, and a whole "quoted" word keeps its spaces. The same
-/// rule as the Electron app, so a saved setting means the same in both.
+/// Splits a line of arguments: spaces separate, and a whole "quoted" word keeps its spaces.
 pub fn split_args(line: &str) -> Vec<String> {
     static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([^"]*)"|(\S+)"#).unwrap());
     WORD.captures_iter(line)
@@ -159,7 +158,7 @@ mod tests {
     #[test]
     fn splits_arguments() {
         assert_eq!(split_args(r#"--model opus --settings "C:\a b\s.json"  x"#), ["--model", "opus", "--settings", r"C:\a b\s.json", "x"]);
-        assert_eq!(split_args(r#"--x="a b" 'c d'"#), [r#"--x="a"#, r#"b""#, "'c", "d'"], "as the Electron app reads it");
+        assert_eq!(split_args(r#"--x="a b" 'c d'"#), [r#"--x="a"#, r#"b""#, "'c", "d'"], "quotes only count around a whole word");
         assert!(split_args("   ").is_empty());
     }
 
@@ -175,11 +174,9 @@ mod tests {
         // Safe here: this test is the only one touching these variables.
         unsafe {
             std::env::set_var("CLAUDE_CODE_CHILD_SESSION", "1");
-            std::env::set_var("ELECTRON_RUN_AS_NODE", "1");
         }
         let e = clean_env();
         assert!(!e.contains_key("CLAUDE_CODE_CHILD_SESSION"));
-        assert!(!e.contains_key("ELECTRON_RUN_AS_NODE"));
         assert_eq!(e.get("COLORTERM").map(String::as_str), Some("truecolor"));
         assert!(e.iter().any(|(k, v)| k.eq_ignore_ascii_case("PATH") && !v.is_empty()));
     }

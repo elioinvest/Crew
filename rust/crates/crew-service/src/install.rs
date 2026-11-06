@@ -1,11 +1,11 @@
 //! The commands sessions use, and what teaches Claude Code and Codex to use them. Their folder and
-//! bridge file are this app's own: the Electron app can run beside it with its own pipe.
+//! bridge file live in the data folder.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crew_core::Paths;
-use serde_json::json;
+use crew_core::{Paths, agents};
+use serde_json::{Value, json};
 
 use crate::bridge::BridgeInfo;
 
@@ -26,6 +26,7 @@ pub fn install_cli(paths: &Paths, bridge: &BridgeInfo) -> bool {
     if std::fs::create_dir_all(&dir).is_err() {
         return false;
     }
+    install_statusline(paths, &dir, &cli);
     let file = bridge_file(paths);
     let _ = std::fs::write(&file, json!({"pipe": bridge.pipe, "token": bridge.token}).to_string());
     let fwd = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
@@ -37,6 +38,30 @@ pub fn install_cli(paths: &Paths, bridge: &BridgeInfo) -> bool {
         }
     }
     true
+}
+
+/// Claude Code gives its status line the plan's rate limits, and Claude sessions start with this one:
+/// `crew-cli statusline` saves them for the usage bar and runs the user's own line. Without crew-cli
+/// beside the app there's no hook at all, rather than one that fails in every session.
+fn install_statusline(paths: &Paths, dir: &Path, cli: &Path) {
+    let settings = agents::statusline_settings(paths);
+    let script = dir.join("crew-statusline.cmd");
+    let usage = paths.data_dir.join("usage-claude.json");
+    let body = format!("@echo off\r\n\"{}\" statusline \"{}\"\r\n", cli.display(), usage.display());
+    if !cli.exists() || std::fs::write(&script, body).is_err() {
+        let _ = std::fs::remove_file(&settings);
+        return;
+    }
+    // Keep the user's padding so their status line sits where it always has.
+    let own: Value = std::fs::read_to_string(paths.home.join(".claude").join("settings.json")).ok().and_then(|t| serde_json::from_str(t.trim_start_matches('\u{feff}')).ok()).unwrap_or(Value::Null);
+    let mut line = json!({ "type": "command", "command": format!("\"{}\"", script.to_string_lossy().replace('\\', "/")) });
+    if let Some(padding) = own.pointer("/statusLine/padding").filter(|p| !p.is_null()) {
+        line["padding"] = padding.clone();
+    }
+    let text = serde_json::to_string_pretty(&json!({ "statusLine": line })).unwrap_or_default();
+    if std::fs::write(&settings, text).is_err() {
+        let _ = std::fs::remove_file(&settings);
+    }
 }
 
 /// What a session needs to use crew-ssh and crew: the commands on its PATH and the way to reach Crew.

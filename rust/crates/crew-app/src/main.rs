@@ -21,7 +21,7 @@ fn main() {
     }
     application().with_assets(assets::CrewAssets).run(|cx: &mut App| {
         gpui_component::init(cx);
-        // Softer edges than ClearType, closer to how the Electron app's text looks.
+        // Softer edges than ClearType, easier on the eye at text sizes.
         cx.set_text_rendering_mode(gpui::TextRenderingMode::Grayscale);
         let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
         cx.open_window(

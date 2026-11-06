@@ -1,6 +1,8 @@
 //! How the terminal area is divided: a tree of splits whose leaves each show one session or nothing.
 //! Closing a pane doesn't stop its session; it keeps running and can be reopened from the sidebar.
 
+use serde_json::{Value, json};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
     /// The new pane goes to the right.
@@ -104,6 +106,54 @@ impl Layout {
         Self { root: Node::Leaf { id: 1, session: None }, focus: 1, next: 2 }
     }
 
+    /// A saved split shape, with every pane empty.
+    pub fn restored(shape: Option<&Value>) -> Self {
+        let mut layout = Self::new();
+        if let Some(root) = shape.and_then(|s| layout.build(s, 0)) {
+            layout.focus = root.first_leaf();
+            layout.root = root;
+        }
+        layout
+    }
+
+    fn build(&mut self, shape: &Value, depth: usize) -> Option<Node> {
+        if depth > 8 {
+            return None;
+        }
+        let Some([first, second]) = shape.get("children").and_then(Value::as_array).map(Vec::as_slice) else {
+            return Some(Node::Leaf { id: self.fresh_id(), session: None });
+        };
+        let dir = if shape.get("dir").and_then(Value::as_str) == Some("column") { Dir::Column } else { Dir::Row };
+        let ratio = shape.get("ratio").and_then(Value::as_f64).unwrap_or(0.5).clamp(0.15, 0.85) as f32;
+        let (a, b) = (Box::new(self.build(first, depth + 1)?), Box::new(self.build(second, depth + 1)?));
+        Some(Node::Split { id: self.fresh_id(), dir, ratio, a, b })
+    }
+
+    /// The split shape without what's in the panes, to save.
+    pub fn shape(&self) -> Value {
+        fn of(node: &Node) -> Value {
+            match node {
+                Node::Leaf { .. } => json!({}),
+                Node::Split { dir, ratio, a, b, .. } => json!({ "dir": if *dir == Dir::Column { "column" } else { "row" }, "ratio": ratio, "children": [of(a), of(b)] }),
+            }
+        }
+        of(&self.root)
+    }
+
+    /// Puts a session in a pane. If it's showing in another, the two panes swap what they show.
+    pub fn place(&mut self, session: u64, leaf: u64) {
+        let from = self.leaf_of(session);
+        let there = self.leaves().into_iter().find(|l| l.0 == leaf).and_then(|l| l.1);
+        self.root.for_each_leaf(&mut |id, s| {
+            if id == leaf {
+                *s = Some(session);
+            } else if Some(id) == from {
+                *s = there;
+            }
+        });
+        self.focus = leaf;
+    }
+
     fn fresh_id(&mut self) -> u64 {
         self.next += 1;
         self.next - 1
@@ -181,6 +231,39 @@ impl Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shape_comes_back_with_empty_panes() {
+        let mut l = Layout::new();
+        l.show(7);
+        l.split(Dir::Row);
+        l.split(Dir::Column);
+        let shape = l.shape();
+        let back = Layout::restored(Some(&shape));
+        assert_eq!(back.shape(), shape);
+        assert_eq!(back.leaves().len(), 3);
+        assert!(back.leaves().iter().all(|l| l.1.is_none()));
+        assert_eq!(back.focus, back.leaves()[0].0);
+        // Something else in the setting is just no splits.
+        assert_eq!(Layout::restored(Some(&json!("nonsense"))).leaves().len(), 1);
+        assert_eq!(Layout::restored(None).leaves().len(), 1);
+        assert_eq!(Layout::restored(Some(&json!({ "dir": "row", "ratio": 5, "children": [{}, {}] }))).shape()["ratio"], 0.85f32 as f64);
+    }
+
+    #[test]
+    fn placing_a_session_swaps_panes() {
+        let mut l = Layout::new();
+        l.show(1);
+        l.split(Dir::Row);
+        l.show(2);
+        let (first, second) = (l.leaf_of(1).unwrap(), l.leaf_of(2).unwrap());
+        l.place(1, second);
+        assert_eq!((l.leaf_of(1), l.leaf_of(2)), (Some(second), Some(first)));
+        assert_eq!(l.focus, second);
+        l.place(1, second);
+        assert_eq!(l.leaf_of(1), Some(second), "already there");
+        assert_eq!(l.leaf_of(2), Some(first));
+    }
 
     #[test]
     fn splitting_focuses_a_new_empty_pane() {

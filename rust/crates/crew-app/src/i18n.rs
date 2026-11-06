@@ -1,4 +1,4 @@
-//! Chinese for what this version shows. As in the Electron app, the interface is written in English
+//! Chinese for what this version shows. The interface is written in English
 //! and the language setting ("auto", "en" or "zh") picks the translation.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,11 +45,6 @@ pub fn t(text: &'static str) -> &'static str {
         "edits" => "可编辑",
         "full access" => "完全权限",
         "Checking plan usage…" => "正在检查套餐用量…",
-        "No hosts yet. Add them in Electron Crew." => "还没有主机。请在 Electron 版 Crew 中添加。",
-        "No agents yet. Add them in Electron Crew." => "还没有智能体。请在 Electron 版 Crew 中添加。",
-        "SSH hosts open in Electron Crew for now." => "SSH 主机目前请在 Electron 版 Crew 中打开。",
-        "Agents are edited in Electron Crew for now." => "智能体目前请在 Electron 版 Crew 中编辑。",
-        "Sessions on a provider start in Electron Crew for now." => "提供商的会话目前请在 Electron 版 Crew 中启动。",
         "Cancel" => "取消",
         "OK" => "好",
         "Save" => "保存",
@@ -230,7 +225,6 @@ pub fn t(text: &'static str) -> &'static str {
         "None yet. Add a relay, a self-hosted service or another API compatible with OpenAI or Anthropic." => "还没有。添加中转、自托管服务或其他兼容 OpenAI 或 Anthropic 的 API。",
         "Use Crew from the Crew app on your phone: see the open sessions, type into them, start sessions and answer approvals. On the same Wi-Fi, or from anywhere through Tailscale." => "在手机上的 Crew 应用中使用 Crew：查看打开的会话、输入内容、启动会话并回应审批。可在同一 Wi-Fi 下使用，或通过 Tailscale 随处使用。",
         "Let paired phones connect" => "允许已配对的手机连接",
-        "Phone access isn't in this version yet. Use Electron Crew for it for now." => "这个版本还没有手机访问。目前请使用 Electron 版 Crew。",
         "ego lite is the browser agents use for anything that needs a browser." => "ego lite 是智能体在需要浏览器时使用的浏览器。",
         "ego lite: the browser for agents" => "ego lite：智能体的浏览器",
         "✓ ego lite is installed" => "✓ 已安装 ego lite",
@@ -328,7 +322,7 @@ pub fn t(text: &'static str) -> &'static str {
     }
 }
 
-/// The Electron app's whole dictionary (renderer/i18n.js), for what the table above doesn't list.
+/// The whole dictionary, for what the table above doesn't list.
 static ORIGINAL: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> =
     std::sync::LazyLock::new(|| {
         // Owned while parsing: a string with an escape in it can't be borrowed from the file.

@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "crew-app"
-version = "2.6.22"
+version = "2.6.24"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1302,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "crew-cli"
-version = "2.6.22"
+version = "2.6.24"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
@@ -1310,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "crew-core"
-version = "2.6.22"
+version = "2.6.24"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -1328,7 +1328,7 @@ dependencies = [
 
 [[package]]
 name = "crew-service"
-version = "2.6.22"
+version = "2.6.24"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1351,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "crew-term"
-version = "2.6.22"
+version = "2.6.24"
 dependencies = [
  "alacritty_terminal",
  "anyhow",

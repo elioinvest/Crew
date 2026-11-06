@@ -226,7 +226,7 @@ fn write_catalog(p: &Provider, home: &Path) -> Option<PathBuf> {
                 "supported_reasoning_levels": efforts, "shell_type": "unified_exec", "visibility": "list", "supported_in_api": true,
                 "priority": i, "availability_nux": null, "upgrade": null, "support_verbosity": false, "default_verbosity": null,
                 "apply_patch_tool_type": null, "truncation_policy": {"mode": "bytes", "limit": 10000}, "experimental_supported_tools": [],
-                "base_instructions": include_str!("../../../../codex-prompt.md"),
+                "base_instructions": include_str!("../assets/codex-prompt.md"),
             })
         })
         .collect();

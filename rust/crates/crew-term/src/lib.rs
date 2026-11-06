@@ -108,7 +108,7 @@ impl Palette {
     }
 }
 
-// The Electron app's light theme.
+// The light theme.
 const LIGHT_ANSI: [Color24; 16] = [
     0x1f1f1f, 0xc4462d, 0x2f8a46, 0xa06a00, 0x2f62c4, 0x9d3fb3, 0x1a8790, 0xbdb8b0, //
     0x77736d, 0xd9573c, 0x3fa45b, 0xb98200, 0x4a7de0, 0xb55acb, 0x2aa3ad, 0x8d8984,
@@ -301,7 +301,7 @@ pub struct RemoteControl {
 }
 
 enum Backend {
-    Pty { master: FairMutex<Box<dyn MasterPty + Send>>, child: FairMutex<Box<dyn portable_pty::Child + Send + Sync>> },
+    Pty { master: FairMutex<Box<dyn MasterPty + Send>>, child: Arc<FairMutex<Box<dyn portable_pty::Child + Send + Sync>>> },
     Remote(RemoteControl),
 }
 
@@ -393,15 +393,38 @@ impl Terminal {
                         }
                     }
                 }
-                exited.store(true, Ordering::Release);
-                shared.notify(TermEvent::Exited);
+                if !exited.swap(true, Ordering::AcqRel) {
+                    shared.notify(TermEvent::Exited);
+                }
+            })?;
+        }
+
+        // On Windows the output pipe stays open after the program ends, as the pseudo console holds it,
+        // so the end is noticed from the program itself.
+        let child = Arc::new(FairMutex::new(child));
+        {
+            let child = child.clone();
+            let shared = shared.clone();
+            let exited = exited.clone();
+            std::thread::Builder::new().name("crew-term-wait".into()).spawn(move || {
+                while !exited.load(Ordering::Acquire) {
+                    if !matches!(child.lock().try_wait(), Ok(None)) {
+                        // What it printed last is still on its way.
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                        if !exited.swap(true, Ordering::AcqRel) {
+                            shared.notify(TermEvent::Exited);
+                        }
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
             })?;
         }
 
         Ok(Self {
             term,
             shared,
-            backend: Backend::Pty { master: FairMutex::new(pair.master), child: FairMutex::new(child) },
+            backend: Backend::Pty { master: FairMutex::new(pair.master), child },
             parser: FairMutex::new(Processor::new()),
             last_output: AtomicI64::new(0),
             exited,
@@ -1011,6 +1034,17 @@ mod tests {
         assert_eq!(s.cols, 100);
         assert_eq!(s.rows.len(), 30);
         assert_eq!(s.background, 0x181818);
+    }
+
+    #[test]
+    fn notices_when_the_program_ends() {
+        let t = Terminal::spawn(&Command { program: "cmd.exe".into(), args: vec!["/d".into(), "/c".into(), "echo bye".into()], cwd: None, env: Vec::new(), replace_env: false }, 80, 24, Palette::light()).unwrap();
+        let started = std::time::Instant::now();
+        while !t.exited() && started.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(t.exited(), "the end of the program is noticed");
+        assert!(t.screen_text().iter().any(|l| l.contains("bye")), "and what it printed last is on the screen");
     }
 
     #[test]

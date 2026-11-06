@@ -1,6 +1,6 @@
 //! How the agents' CLIs start. Crew runs them and never bundles them.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -19,6 +19,11 @@ pub struct Launch {
 /// Codex session is matched to its file later by folder and start time.
 pub fn agent_argv(config: &Config, paths: &Paths, agent: &str, id: &str, resume: bool, prompt: Option<&str>) -> Vec<String> {
     agent_argv_on(config, paths, agent, id, resume, prompt, &[])
+}
+
+/// The settings Claude sessions start with, for the status line that reports plan usage.
+pub fn statusline_settings(paths: &Paths) -> PathBuf {
+    paths.data_dir.join("crew-claude-settings-rs.json")
 }
 
 /// `pre`: arguments a custom provider adds, right after the command.
@@ -50,8 +55,8 @@ pub fn agent_argv_on(config: &Config, paths: &Paths, agent: &str, id: &str, resu
     let mut v = vec![command("claudeCommand", "claude")];
     v.extend_from_slice(pre);
     if config.bool("showUsage") {
-        // The status line that reports plan usage, when the Electron app has set it up.
-        let settings = paths.data_dir.join("crew-claude-settings.json");
+        // The status line that reports plan usage, which crew-service sets up at startup.
+        let settings = statusline_settings(paths);
         if settings.exists() {
             v.push("--settings".into());
             v.push(settings.to_string_lossy().to_string());

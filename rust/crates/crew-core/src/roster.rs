@@ -1,4 +1,4 @@
-//! The agents sessions can @-mention, in the Electron app's agents.json.
+//! The agents sessions can @-mention, in agents.json.
 
 use std::path::PathBuf;
 

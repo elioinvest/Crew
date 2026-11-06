@@ -31,9 +31,11 @@ use crate::terminal_view::{TerminalEvent, TerminalView};
 use crate::theme::Colors;
 
 mod agents_panel;
+mod agent_setup;
 mod attachments;
 mod browser_panel;
 mod composer_tools;
+mod drag_drop;
 mod files_panel;
 mod forms;
 mod git_panel;
@@ -57,7 +59,7 @@ const SIDEBAR_MIN: f32 = 200.;
 const SIDEBAR_MAX: f32 = 560.;
 const RESCAN: Duration = Duration::from_secs(3);
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// As in the Electron app: each agent's group shows this many before "Show more".
+/// Each agent's group shows this many before "Show more".
 const SESSIONS_SHOWN: usize = 8;
 const USAGE_TICK: Duration = Duration::from_secs(30);
 const CODEX_CHECK_EVERY: Duration = Duration::from_secs(2 * 60);
@@ -165,6 +167,14 @@ pub struct CrewApp {
     see_through: bool,
     image_view: Option<PathBuf>,
     image_hover: term_links::ImageHover,
+    /// Agents found on this computer, so each is only looked for once.
+    agents_found: HashSet<String>,
+    missing_agent: Option<agent_setup::MissingAgent>,
+    /// The installer's pane, and the session waiting for it.
+    installing: Option<(u64, agent_setup::PendingStart)>,
+    /// The project a dragged one would land next to, and whether after it.
+    project_drop: Option<(PathBuf, bool)>,
+    saved_layout: Value,
     /// Sessions with a live agent anywhere on this machine, and whether each is working.
     live_elsewhere: HashMap<String, bool>,
     claude_catalog: Option<Arc<crew_core::composer::ClaudeCatalog>>,
@@ -306,6 +316,8 @@ impl CrewApp {
             }),
         ];
         let sidebar_width = config.f32("sidebarWidth", SIDEBAR_WIDTH).clamp(SIDEBAR_MIN, SIDEBAR_MAX);
+        let restored_layout = Layout::restored(config.raw().get("paneLayout"));
+        let saved_layout_shape = restored_layout.shape();
         let (service, events) = Service::start(paths.clone());
         cx.spawn_in(window, async move |this, cx| {
             while let Ok(event) = events.recv().await {
@@ -349,7 +361,7 @@ impl CrewApp {
             composer,
             open: Vec::new(),
             next_key: 1,
-            layout: Layout::new(),
+            layout: restored_layout,
             current_project: None,
             sidebar_hidden: false,
             sidebar_width,
@@ -399,6 +411,11 @@ impl CrewApp {
             see_through: false,
             image_view: None,
             image_hover: term_links::ImageHover::default(),
+            agents_found: HashSet::new(),
+            missing_agent: None,
+            installing: None,
+            project_drop: None,
+            saved_layout: saved_layout_shape,
             live_elsewhere: HashMap::new(),
             claude_catalog: None,
             codex_list: None,
@@ -726,6 +743,10 @@ impl CrewApp {
     #[allow(clippy::too_many_arguments)]
     fn start(&mut self, agent: &str, id: String, cwd: PathBuf, title: Option<String>, resume: bool, provider: Option<String>, prompt: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
         self.notice = None;
+        let wanted = agent_setup::PendingStart { agent: agent.to_string(), id: id.clone(), cwd: cwd.clone(), title: title.clone(), resume, provider: provider.clone(), prompt: prompt.map(str::to_string) };
+        if !self.agent_ready(wanted, cx) {
+            return;
+        }
         // A custom provider: the one chosen for a new session, or the one a resumed session ran on,
         // with the model and effort picked in it (kept for the next resume).
         let bound = if resume { providers::binding(&self.paths, &id) } else { None };
@@ -775,7 +796,9 @@ impl CrewApp {
     #[allow(clippy::too_many_arguments)]
     fn attach(&mut self, agent: &str, id: String, cwd: PathBuf, title: Option<String>, on_disk: bool, term: Arc<Terminal>, window: &mut Window, cx: &mut Context<Self>) -> u64 {
         let (palette, size) = (self.palette.clone(), self.config.f32("fontSize", 14.));
-        self.service.remote_terminal(&id, agent, &cwd.to_string_lossy(), &term);
+        if agent != "install" {
+            self.service.remote_terminal(&id, agent, &cwd.to_string_lossy(), &term);
+        }
         let view = cx.new(|cx| TerminalView::new(term, palette, size, cx));
         let key = self.next_key;
         self.next_key += 1;
@@ -791,6 +814,10 @@ impl CrewApp {
             }
             if let TerminalEvent::HoverImage(hover) = event {
                 app.on_terminal_image_hover(key, hover.clone(), cx);
+                return;
+            }
+            if matches!(event, TerminalEvent::Exited) && app.installing.as_ref().is_some_and(|(k, _)| *k == key) {
+                app.installer_exited(key, window, cx);
                 return;
             }
             if let Some(o) = app.open.iter_mut().find(|o| o.key == key) {
@@ -1277,7 +1304,7 @@ impl CrewApp {
         div().flex().flex_none().text_color(color).child(Icon::empty().path(path).size(px(size))).into_any_element()
     }
 
-    /// Its image, its emoji, or its first letter on a colour of its own, as in the Electron app.
+    /// Its image, its emoji, or its first letter on a colour of its own.
     fn provider_icon(&self, p: &Provider) -> AnyElement {
         let base = div().flex().flex_none().items_center().justify_center().size(px(16.)).rounded(px(4.)).overflow_hidden();
         if let Some(image) = self.provider_images.get(&p.id) {
@@ -1312,6 +1339,7 @@ impl CrewApp {
     }
 
     fn render_session(&self, session: &Session, project: &Path, cx: &mut Context<Self>) -> AnyElement {
+        let draggable_project = project.to_path_buf();
         let c = self.colors;
         let open = self.open.iter().find(|o| o.id == session.id && o.agent == session.agent);
         let is_active = open.is_some_and(|o| Some(o.key) == self.layout.focused_session());
@@ -1329,8 +1357,8 @@ impl CrewApp {
         let menu_open = self.menu_owner() == Some(format!("session:{}", session.id).as_str());
         let open_key = self.open.iter().find(|o| o.id == session.id && o.agent == session.agent).map(|o| o.key);
         let project = project.to_path_buf();
-        div()
-            .id(SharedString::from(format!("session-{}-{}", session.agent, session.id)))
+        let row = div().id(SharedString::from(format!("session-{}-{}", session.agent, session.id)));
+        self.session_drag_handler(row, session, &draggable_project)
             .relative()
             .when(shown_here && !is_active, |d| d.child(self.shown_mark()))
             .flex()
@@ -1688,8 +1716,7 @@ impl CrewApp {
                 .flex()
                 .flex_col()
                 .child(
-                    div()
-                        .id(SharedString::from(format!("project-row-{key}")))
+                    self.project_drag_handlers(div().id(SharedString::from(format!("project-row-{key}"))), project, cx)
                         .group(group.clone())
                         .flex()
                         .items_center()
@@ -2065,8 +2092,7 @@ impl CrewApp {
         } else {
             open.map(|o| o.title.clone().unwrap_or_else(|| t("New session").into())).unwrap_or_else(|| t("Empty").into())
         };
-        div()
-            .id(SharedString::from(format!("pane-{leaf}")))
+        self.pane_drop_handlers(div().id(SharedString::from(format!("pane-{leaf}"))), leaf, cx)
             .flex()
             .flex_col()
             .size_full()
@@ -2186,6 +2212,9 @@ impl Render for CrewApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.apply_pending_key_file(window, cx);
         self.run_deferred(window, cx);
+        if self.drag.is_none() {
+            self.save_layout_if_changed();
+        }
         // GPUI's surface lies above child windows, so a web page only shows through a transparent hole.
         if self.see_through != self.browser.is_some() {
             self.see_through = self.browser.is_some();
@@ -2293,6 +2322,7 @@ impl Render for CrewApp {
             .children(self.render_approvals(cx))
             .children(self.render_agent_editor(cx))
             .children(self.render_run_result(cx))
+            .children(self.render_missing_agent(cx))
             .children(self.render_image_view(cx))
             .children(self.render_image_hover(window))
             .children(self.render_picker(window, cx))

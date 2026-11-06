@@ -1,4 +1,4 @@
-//! SSH on the model of Hatoba (github.com/scarletkc/Hatoba), as in the Electron app: connections are
+//! SSH on the model of Hatoba (github.com/scarletkc/Hatoba): connections are
 //! shared per host and close after ten idle minutes, host keys are trusted on first use and blocked
 //! when they change, and the user's terminal on a host can be read and typed into by agents.
 

@@ -1,6 +1,6 @@
 //! The status bar's numbers. Plan limits come from Crew's status line hook, Codex's logs and a live
 //! check; today's tokens and estimated API cost are read out of the session files. The rules for
-//! reading those files come from usage-scan.js in the Electron app (and T3 Code before it, MIT).
+//! reading those files come from T3 Code (MIT).
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
@@ -693,11 +693,11 @@ fn price_doc(paths: &Paths) -> (Value, String) {
     if let Some(doc) = saved() {
         return (doc, "cached".into());
     }
-    (serde_json::from_str(include_str!("../../../../usage-prices.json")).unwrap_or(Value::Null), "bundled".into())
+    (serde_json::from_str(include_str!("../assets/usage-prices.json")).unwrap_or(Value::Null), "bundled".into())
 }
 
 impl UsageScanner {
-    /// One row per hour, provider, model, speed and session, as the Electron app's scanner gives.
+    /// One row per hour, provider, model, speed and session.
     pub fn scan(&mut self, paths: &Paths, homes: &[ProviderHome]) -> UsageData {
         let cache_file = paths.data_dir.join("usage-scan-cache-rs.json");
         let cache = self.cache.get_or_insert_with(|| {

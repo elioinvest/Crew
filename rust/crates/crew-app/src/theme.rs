@@ -1,4 +1,4 @@
-//! Crew's colours, from the Electron app's stylesheet.
+//! Crew's colours.
 
 use gpui::{Hsla, rgb, rgba};
 

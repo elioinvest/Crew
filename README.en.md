@@ -1,7 +1,7 @@
 🌐 [中文](README.md) · **English**
 
 <p align="center">
-  <img src="build/icon.svg" alt="Crew icon" width="128" height="128">
+  <img src="rust/crates/crew-app/assets/icon.svg" alt="Crew icon" width="128" height="128">
 </p>
 
 Crew is a Windows desktop app for Claude Code and Codex. Run the official CLIs side by side in split panes, organized by project, with a real prompt box, one-click model and mode switching, live status for each agent, a built-in web browser and tray mode. Resume any past session with a single click.
@@ -10,9 +10,9 @@ Crew doesn't replace either tool. Every session is the official `claude` or `cod
 
 ## Install
 
-1. Download `Crew Setup <version>.exe` from the [Releases](https://github.com/elioinvest/Crew/releases) page.
-2. Run it. You can choose the install folder, and it adds Start menu and desktop shortcuts.
-3. The installer isn't code-signed, so Windows SmartScreen may warn about an unknown publisher. Click **More info**, then **Run anyway**.
+1. Download `Crew-Rust-<version>-win-x64.zip` from the [Releases](https://github.com/elioinvest/Crew/releases) page.
+2. Unzip it anywhere and keep `crew.exe` and `crew-cli.exe` together.
+3. Run `crew.exe`. It isn't code-signed, so Windows SmartScreen may warn about an unknown publisher: click **More info**, then **Run anyway**. Windows may also ask to allow it through the firewall if you use phone access.
 
 ### The agents
 
@@ -132,13 +132,14 @@ Use Crew on your computer from your phone's browser (an iPhone too) or from the 
 
 ## Build from source
 
-Requires Node.js 20 or later.
+Requires Rust (the version is pinned in `rust/rust-toolchain.toml`) and the Visual Studio C++ build tools.
 
 ```
-npm install
-npm start          # run in development
-npm run dist       # build the Windows installer into release/
+cd rust
+cargo build --release -p crew-app -p crew-cli
 ```
+
+The programs are `crew.exe` and `crew-cli.exe` in `target/release`.
 
 ## License
 
