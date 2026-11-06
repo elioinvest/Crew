@@ -1,0 +1,13 @@
+[package]
+name = "crew-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "crew-cli"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+serde_json.workspace = true

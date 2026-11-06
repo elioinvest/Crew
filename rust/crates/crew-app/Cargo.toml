@@ -1,0 +1,35 @@
+[package]
+name = "crew-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "crew"
+path = "src/main.rs"
+
+[build-dependencies]
+embed-resource = "3"
+
+[dependencies]
+crew-term = { path = "../crew-term" }
+crew-core = { path = "../crew-core" }
+crew-service = { path = "../crew-service" }
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui-component.workspace = true
+gpui-kit-assets.workspace = true
+base64 = "0.22"
+chrono = "0.4"
+trash = "5"
+wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+ureq = "3"
+futures = "0.3"
+sys-locale = "0.3"
+uuid = { version = "1", features = ["v4"] }
+anyhow.workspace = true
+serde_json.workspace = true
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "tiff"] }
+qrcode = { version = "0.14.1", default-features = false }

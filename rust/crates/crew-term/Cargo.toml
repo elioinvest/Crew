@@ -1,0 +1,11 @@
+[package]
+name = "crew-term"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+alacritty_terminal.workspace = true
+portable-pty.workspace = true
+anyhow.workspace = true
+async-channel = "2"

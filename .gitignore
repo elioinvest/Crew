@@ -27,3 +27,6 @@ latest*.yml
 *.rpm
 *.snap
 *.nupkg
+
+# Rust build output, kept outside the repository by CARGO_TARGET_DIR, but in case it lands here.
+rust/target/

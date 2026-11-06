@@ -1,0 +1,27 @@
+[package]
+name = "crew-service"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+crew-core = { path = "../crew-core" }
+crew-term = { path = "../crew-term" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-channel = "2"
+base64 = "0.22"
+rand = "0.9"
+regex = "1"
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh-sftp = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util", "fs"] }
+uuid = { version = "1", features = ["v4"] }
+tokio-tungstenite = "0.30.0"
+futures-util = "0.3.34"
+if-addrs = "0.15.0"
+chrono = "0.4.45"
+
+[dev-dependencies]
+crew-term = { path = "../crew-term" }

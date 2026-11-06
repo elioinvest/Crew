@@ -1,0 +1,21 @@
+[package]
+name = "crew-core"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+aes-gcm = "0.10"
+base64 = "0.22"
+chrono = "0.4"
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+ureq = "3"
+trash = "5"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
