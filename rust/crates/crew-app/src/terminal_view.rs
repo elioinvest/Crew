@@ -28,6 +28,10 @@ const BAR_WIDTH: f32 = 8.0;
 const BAR_REACH: f32 = 12.0;
 const BAR_MARGIN: f32 = 2.0;
 const THUMB_MIN: f32 = 24.0;
+/// While a program does its own scrolling: how far a drag goes for one wheel notch, and the thumb's
+/// share of the track, as nothing says how much there is to scroll.
+const PROGRAM_NOTCH: f32 = 8.0;
+const PROGRAM_THUMB: f32 = 0.2;
 
 /// Where the scrollbar's thumb is in its track, for `rows` lines on screen `offset` lines up from the
 /// bottom of `history` lines above them: (distance from the track's top, height).
@@ -38,6 +42,14 @@ fn thumb_of(track: f32, history: usize, offset: usize, rows: usize) -> Option<(f
     let height = (track * rows as f32 / (history + rows) as f32).max(THUMB_MIN).min(track);
     let top = (track - height) * (1. - offset.min(history) as f32 / history as f32);
     Some((top, height))
+}
+
+/// The thumb while a program scrolls itself. Where it is in what's there to scroll can't be known, so
+/// it rests in the middle and follows a drag: (distance from the track's top, height).
+fn program_thumb(track: f32, dragged: f32) -> (f32, f32) {
+    let height = (track * PROGRAM_THUMB).max(THUMB_MIN).min(track);
+    let room = (track - height) / 2.;
+    (room + dragged.clamp(-room, room), height)
 }
 
 /// The offset for the thumb's top at `top`: the way back from [`thumb_of`].
@@ -75,6 +87,11 @@ pub struct TerminalView {
     scrolled: (usize, usize, usize),
     /// While dragging the scrollbar: where in the thumb it was taken.
     bar_grab: Option<f32>,
+    /// While dragging it over a program that scrolls itself: where the drag started, in the window,
+    /// how far it's come, and the wheel notches sent for that so far (up is positive).
+    program_drag: Option<(f32, f32, i32)>,
+    /// The press went to the scrollbar, so its release mustn't reach the program either.
+    swallow_up: bool,
     bar_hovered: bool,
 }
 
@@ -152,6 +169,8 @@ impl TerminalView {
             pressed_link: None,
             scrolled: (0, 0, 0),
             bar_grab: None,
+            program_drag: None,
+            swallow_up: false,
             bar_hovered: false,
         }
     }
@@ -208,13 +227,24 @@ impl TerminalView {
         (col, row, x.fract() >= 0.5)
     }
 
-    /// The scrollbar's track: its top and height in the window. A program that owns the mouse scrolls
-    /// itself, so there's none then.
-    fn bar_track(&self) -> Option<(f32, f32)> {
-        if self.term.mode().intersects(Mode::MOUSE_MODE) {
-            return None;
+    /// The scrollbar's track: its top and height in the window.
+    fn bar_track(&self) -> (f32, f32) {
+        (f32::from(self.bounds.origin.y) + BAR_MARGIN, f32::from(self.bounds.size.height) - 2. * BAR_MARGIN)
+    }
+
+    /// A program that takes the mouse (Codex, a custom model's session on it) keeps and scrolls what's
+    /// on screen itself: the scrollbar goes through the wheel instead of the terminal's history.
+    fn program_scrolls(&self) -> bool {
+        self.term.mode().intersects(Mode::MOUSE_MODE)
+    }
+
+    /// Wheel notches to the program, at the middle of the screen: up is positive.
+    fn send_notches(&self, notches: i32) {
+        let (cols, rows) = self.term.size();
+        let button = if notches > 0 { 64 } else { 65 };
+        for _ in 0..notches.abs() {
+            self.mouse_report(button, cols as usize / 2, rows as usize / 2, true);
         }
-        Some((f32::from(self.bounds.origin.y) + BAR_MARGIN, f32::from(self.bounds.size.height) - 2. * BAR_MARGIN))
     }
 
     fn over_bar(&self, position: Point<Pixels>) -> bool {
@@ -224,7 +254,21 @@ impl TerminalView {
 
     /// Takes the scrollbar: by the thumb where it is, or anywhere else to bring the thumb there.
     fn press_bar(&mut self, y: f32, cx: &mut Context<Self>) -> bool {
-        let Some((top, track)) = self.bar_track() else { return false };
+        let (top, track) = self.bar_track();
+        if self.program_scrolls() {
+            let (thumb, height) = program_thumb(track, 0.);
+            let inside = y - top - thumb;
+            if (0. ..=height).contains(&inside) {
+                self.program_drag = Some((y, 0., 0));
+            } else {
+                // Beside the thumb: a screenful that way.
+                let (_, rows) = self.term.size();
+                let notches = (rows as i32 / 3).max(1);
+                self.send_notches(if inside < 0. { notches } else { -notches });
+            }
+            cx.notify();
+            return true;
+        }
         let (history, offset, rows) = self.scrolled;
         let Some((thumb, height)) = thumb_of(track, history, offset, rows) else { return false };
         let inside = y - top - thumb;
@@ -234,7 +278,17 @@ impl TerminalView {
     }
 
     fn drag_bar(&mut self, y: f32, cx: &mut Context<Self>) {
-        let (Some(grab), Some((top, track))) = (self.bar_grab, self.bar_track()) else { return };
+        let (top, track) = self.bar_track();
+        if let Some((start, _, sent)) = self.program_drag {
+            // Dragged up goes back through the conversation, as on any scrollbar.
+            let dragged = y - start;
+            let wanted = (-dragged / PROGRAM_NOTCH) as i32;
+            self.send_notches(wanted - sent);
+            self.program_drag = Some((start, dragged, wanted));
+            cx.notify();
+            return;
+        }
+        let Some(grab) = self.bar_grab else { return };
         let (history, offset, rows) = self.scrolled;
         let Some((_, height)) = thumb_of(track, history, offset, rows) else { return };
         self.term.scroll_to(offset_at(y - top - grab, track, height, history));
@@ -378,8 +432,10 @@ impl TerminalView {
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        self.swallow_up = false;
         if e.button == MouseButton::Left && self.over_bar(e.position) && self.press_bar(f32::from(e.position.y), cx) {
             self.pressed_link = None;
+            self.swallow_up = true;
             return;
         }
         self.pressed_link = if e.button == MouseButton::Left { self.link_at(e.position) } else { None };
@@ -429,6 +485,9 @@ impl TerminalView {
     }
 
     fn on_mouse_up(&mut self, e: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.swallow_up) {
+            return;
+        }
         self.finish_link_click(e, cx);
         let mode = self.term.mode();
         if mode.intersects(Mode::MOUSE_MODE) && !e.modifiers.shift && !self.selecting {
@@ -874,17 +933,22 @@ impl Element for TerminalElement {
         {
             let view = self.view.read(cx);
             let (history, offset, rows) = view.scrolled;
-            if let Some((top, track)) = view.bar_track() {
-                if let Some((thumb, height)) = thumb_of(track, history, offset, rows) {
-                    let active = view.bar_grab.is_some() || view.bar_hovered;
-                    let x = bounds.origin.x + bounds.size.width - px(BAR_WIDTH + BAR_MARGIN);
-                    let area = Bounds::new(point(x, px(top + thumb)), size(px(BAR_WIDTH), px(height)));
-                    let mut tint = color(p.palette.foreground);
-                    tint.a = if active { 0.42 } else { 0.2 };
-                    window.paint_quad(fill(area, tint).corner_radii(px(BAR_WIDTH / 2.)));
-                }
+            let (top, track) = view.bar_track();
+            let dragging = view.bar_grab.is_some() || view.program_drag.is_some();
+            let thumb = if view.program_scrolls() {
+                Some(program_thumb(track, view.program_drag.map_or(0., |d| d.1)))
+            } else {
+                thumb_of(track, history, offset, rows)
+            };
+            if let Some((thumb, height)) = thumb {
+                let active = dragging || view.bar_hovered;
+                let x = bounds.origin.x + bounds.size.width - px(BAR_WIDTH + BAR_MARGIN);
+                let area = Bounds::new(point(x, px(top + thumb)), size(px(BAR_WIDTH), px(height)));
+                let mut tint = color(p.palette.foreground);
+                tint.a = if active { 0.42 } else { 0.2 };
+                window.paint_quad(fill(area, tint).corner_radii(px(BAR_WIDTH / 2.)));
             }
-            if view.bar_grab.is_some() {
+            if dragging {
                 let moving = self.view.clone();
                 window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
                     if phase == gpui::DispatchPhase::Bubble {
@@ -896,6 +960,7 @@ impl Element for TerminalElement {
                     if phase == gpui::DispatchPhase::Bubble && e.button == MouseButton::Left {
                         letting_go.update(cx, |v, cx| {
                             v.bar_grab = None;
+                            v.program_drag = None;
                             cx.notify();
                         });
                     }
@@ -968,6 +1033,16 @@ mod tests {
         assert_eq!(thumb_of(400., 70, 70, 30).unwrap().0, 0.);
         // A long history still leaves a thumb to take hold of.
         assert_eq!(thumb_of(400., 10_000, 0, 30).unwrap().1, THUMB_MIN);
+    }
+
+    #[test]
+    fn a_program_s_thumb_rests_in_the_middle_and_follows_a_drag() {
+        let (top, height) = program_thumb(400., 0.);
+        assert_eq!((top, height), (160., 80.));
+        assert_eq!(program_thumb(400., -50.).0, 110.);
+        // It stays in the track however far the mouse goes.
+        assert_eq!(program_thumb(400., -9000.).0, 0.);
+        assert_eq!(program_thumb(400., 9000.).0, 320.);
     }
 
     #[test]
