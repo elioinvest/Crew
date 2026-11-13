@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use gpui::{AssetSource, Image, ImageFormat, Result, SharedString};
 
+pub const 
 pub const GIT_BRANCH: &str = "crew/git-branch.svg";
 pub const FOLDER_PLUS: &str = "crew/folder-plus.svg";
 pub const SPLIT_RIGHT: &str = "crew/split-right.svg";

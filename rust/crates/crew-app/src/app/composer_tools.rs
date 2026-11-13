@@ -94,19 +94,22 @@ async fn send_command(term: &Terminal, ex: &BackgroundExecutor, command: &str) {
         if term.exited() {
             return;
         }
-        for _ in 0..20 {
+        for _ in 0..40 {
             if composer::prompt_text(&term.screen_text()).as_deref() == Some("") {
                 break;
             }
-            sleep(ex, 200).await;
+            sleep(ex, 100).await;
         }
         send_text(term, ex, command).await;
-        sleep(ex, 1500).await;
         // Echoed above the prompt box = submitted (the box itself would show it unsent).
-        let lines = term.screen_text();
-        let the_box = lines.iter().rposition(|l| l.trim_start().starts_with('❯')).unwrap_or(0);
-        if lines[..the_box].iter().any(|l| l.contains(&format!("❯ {command}"))) {
-            return;
+        let echoed = format!("❯ {command}");
+        for _ in 0..20 {
+            sleep(ex, 100).await;
+            let lines = term.screen_text();
+            let the_box = lines.iter().rposition(|l| l.trim_start().starts_with('❯')).unwrap_or(0);
+            if lines[..the_box].iter().any(|l| l.contains(&echoed)) {
+                return;
+            }
         }
     }
 }
@@ -386,12 +389,11 @@ impl CrewApp {
         );
         let mut older_seen = false;
         for m in catalog.iter().flat_map(|c| c.models.iter()) {
-            // A current model by its short name (it's saved as the default for new sessions, and
-            // "sonnet" keeps meaning the newest Sonnet); an older one by its full id.
-            let short = m.aliases.first().filter(|a| m.current && a.chars().all(|c| c.is_ascii_lowercase()));
-            let (arg, slug) = (short.unwrap_or(&m.slug).clone(), m.slug.clone());
+            // By its full id: a short name like "fable" means whichever model the installed Claude
+            // Code was built with, which can be older than the one the list shows.
+            let slug = m.slug.clone();
             let mut row = entry(m.label.clone(), move |app, _, cx| {
-                app.queued(key, cx, format!("/model {arg}"), false);
+                app.queued(key, cx, format!("/model {slug}"), false);
                 if let Some(c) = app.chips_of(key) {
                     c.picked.model = Some(slug.clone());
                 }
