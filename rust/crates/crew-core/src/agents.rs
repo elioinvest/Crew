@@ -38,6 +38,18 @@ pub fn agent_argv_on(config: &Config, paths: &Paths, agent: &str, id: &str, resu
         let c = config.str(key);
         if c.is_empty() { default.to_string() } else { c.to_string() }
     };
+    if agent == "agy" {
+        let mut v = vec![command("agyCommand", "agy")];
+        v.extend(split_args(config.str("agyArgs")));
+        if resume {
+            v.push("--conversation".into());
+            v.push(id.into());
+        } else if !first.is_empty() {
+            v.push("-i".into());
+            v.extend(first);
+        }
+        return v;
+    }
     if agent == "codex" {
         let extra = split_args(config.str("codexArgs"));
         let mut v = vec![command("codexCommand", "codex")];
@@ -134,6 +146,14 @@ mod tests {
         let (c, p) = cfg(serde_json::json!({"codexArgs":"-m gpt-5.5"}));
         assert_eq!(agent_argv(&c, &p, "codex", "id2", false, None), ["codex", "-m", "gpt-5.5"]);
         assert_eq!(agent_argv(&c, &p, "codex", "id2", true, None), ["codex", "resume", "-m", "gpt-5.5", "id2"]);
+    }
+
+    #[test]
+    fn agy_new_and_resume() {
+        let (c, p) = cfg(serde_json::json!({"agyArgs":"--model flash"}));
+        assert_eq!(agent_argv(&c, &p, "agy", "id3", false, None), ["agy", "--model", "flash"]);
+        assert_eq!(agent_argv(&c, &p, "agy", "id3", false, Some("hi\nthere")), ["agy", "--model", "flash", "-i", "hi there"]);
+        assert_eq!(agent_argv(&c, &p, "agy", "id3", true, Some("ignored")), ["agy", "--model", "flash", "--conversation", "id3"]);
     }
 
     #[test]

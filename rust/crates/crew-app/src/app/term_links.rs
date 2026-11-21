@@ -1,8 +1,6 @@
 //! What a click on a link in a terminal does. Web links open in the side browser (Ctrl+click: default
 //! browser). File links and Windows paths open images in a viewer over the app and other files in
-//! their default program. "[Image #N]" shows the image on hover and opens it on click.
-
-use std::path::Path;
+//! Crew's file viewer beside the terminal. "[Image #N]" shows the image on hover and opens it on click.
 
 use crew_core::images;
 use crew_core::links::{LinkTarget, file_path_of};
@@ -28,8 +26,17 @@ impl CrewApp {
                 let path = PathBuf::from(file_path_of(&link));
                 if is_image_path(&path) {
                     self.image_view = Some(path);
-                } else if Path::new(&path).exists() {
-                    cx.open_with_system(&path);
+                } else if path.is_file() {
+                    // Open file paths in Crew's own viewer beside the terminal, not in another app.
+                    let cwd = self.active().map(|o| o.cwd.clone());
+                    let relative = cwd.as_ref().and_then(|cwd| path.strip_prefix(cwd).ok().map(|rel| (cwd.clone(), rel.to_string_lossy().replace('\\', "/"))));
+                    let (root, rel) = relative.unwrap_or_else(|| match path.parent() {
+                        Some(parent) => (parent.to_path_buf(), path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+                        None => (path.clone(), String::new()),
+                    });
+                    if !rel.is_empty() {
+                        self.show_file(root, rel, None, cx);
+                    }
                 }
             }
             LinkTarget::Image { n, context } => {

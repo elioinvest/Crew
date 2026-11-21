@@ -467,6 +467,18 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
         }
     }
 
+    for s in crate::agy::sessions(paths) {
+        let cwd = s.cwd.clone().unwrap_or_default();
+        let proj = projects.entry(norm(&cwd)).or_insert_with(|| Project {
+            name: base_name(&cwd),
+            path: cwd.clone(),
+            sessions: Vec::new(),
+            mtime: 0.0,
+            exists: false,
+        });
+        proj.sessions.push(s);
+    }
+
     // Sessions in a linked worktree are listed under their repository's project.
     let registry = Registry::load(paths);
     let keys: Vec<String> = projects.keys().cloned().collect();

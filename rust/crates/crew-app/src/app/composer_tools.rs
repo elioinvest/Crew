@@ -23,6 +23,7 @@ const CODEX_PERMISSIONS: [(&str, &str); 4] = [
     ("Full Access", "Use with caution: edits files outside this workspace and uses the internet without asking"),
     ("Read Only", "Reads workspace files; asks for edits or internet access"),
 ];
+const AGY_MODES: [(&str, &str); 3] = [("manual", "Default"), ("acceptEdits", "Accept edits"), ("plan", "Plan")];
 const CLAUDE_ALIASES: [(&str, &str); 4] = [("fable", "Fable 5.1"), ("opus", "Opus 5.5"), ("sonnet", "Sonnet 5.5"), ("haiku", "Haiku 5.5")];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -114,15 +115,58 @@ async fn send_command(term: &Terminal, ex: &BackgroundExecutor, command: &str) {
     }
 }
 
-/// Shift+Tab cycles Claude's permission modes: press it until the status line says so.
-async fn set_claude_mode(term: &Terminal, ex: &BackgroundExecutor, target: &str) {
+/// Shift+Tab cycles Claude's and Antigravity's permission modes: press it until the status line says so.
+async fn set_mode(term: &Terminal, ex: &BackgroundExecutor, agent: &str, target: &str) {
     for _ in 0..6 {
-        if composer::read_screen("claude", &term.screen_text()).mode.as_deref() == Some(target) {
+        if composer::read_screen(agent, &term.screen_text()).mode.as_deref() == Some(target) {
             return;
         }
         term.write(b"\x1b[Z");
         sleep(ex, 400).await;
     }
+}
+
+/// Types one of Antigravity's commands and waits for the menu with this heading.
+async fn open_agy_menu(term: &Terminal, ex: &BackgroundExecutor, command: &str, heading: &str) -> bool {
+    term.write(command.as_bytes());
+    sleep(ex, 300).await;
+    term.write(b"\r");
+    for _ in 0..25 {
+        sleep(ex, 200).await;
+        if term.screen_text().iter().any(|l| l.trim() == heading) {
+            return true;
+        }
+    }
+    false
+}
+
+/// /model: the search box narrows the list to the model, and Enter picks it.
+async fn select_agy_model(term: &Terminal, ex: &BackgroundExecutor, label: &str) -> Result<(), String> {
+    if !open_agy_menu(term, ex, "/model", "Switch Model").await {
+        return Err(t("Antigravity didn't open its menu — try again when it's idle").to_string());
+    }
+    term.write(label.as_bytes());
+    sleep(ex, 600).await;
+    term.write(b"\r");
+    Ok(())
+}
+
+/// /effort: a slider from low to high. All the way left, then right to the level, then Enter.
+async fn select_agy_effort(term: &Terminal, ex: &BackgroundExecutor, levels: &[String], level: &str) -> Result<(), String> {
+    let Some(at) = levels.iter().position(|l| l == level) else { return Err(format!("Antigravity doesn't offer \"{level}\" here")) };
+    if !open_agy_menu(term, ex, "/effort", "Set Effort").await {
+        return Err(t("Antigravity didn't open its menu — try again when it's idle").to_string());
+    }
+    for _ in 0..levels.len() {
+        term.write(b"\x1b[D");
+        sleep(ex, 250).await; // keys sent faster get merged
+    }
+    for _ in 0..at {
+        term.write(b"\x1b[C");
+        sleep(ex, 250).await;
+    }
+    term.write(b"\r");
+    Ok(())
 }
 
 async fn wait_for_codex_step(term: &Terminal, ex: &BackgroundExecutor, heading: &str) -> Option<composer::Picker> {
@@ -228,10 +272,38 @@ impl CrewApp {
         .detach();
     }
 
+    /// Antigravity's models come from `agy models`, which asks its servers: fetched on demand.
+    fn fetch_agy_models(&mut self, then: Option<(Chip, Point<Pixels>)>, cx: &mut Context<Self>) {
+        if self.agy_list_loading {
+            return;
+        }
+        self.agy_list_loading = true;
+        let command = self.config.str("agyCommand").to_string();
+        let work = cx.background_spawn(async move { crew_core::agy::models(&command) });
+        cx.spawn(async move |this, cx| {
+            let list = work.await;
+            let _ = this.update(cx, |app, cx| {
+                app.agy_list_loading = false;
+                if let Some(list) = list {
+                    app.agy_list = Some(Arc::new(list));
+                } else if then.is_some() {
+                    app.hint = Some(t("Couldn't read Antigravity's model list — try again in a moment").to_string());
+                }
+                if let Some((chip, at)) = then {
+                    if app.agy_list.is_some() {
+                        app.open_chip(chip, at, cx);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// What a session's file saved. Called when it's shown, and now and then while it's in front,
     /// as a reply reports the model it really ran on.
     pub(super) fn load_session_settings(&mut self, key: u64, cx: &mut Context<Self>) {
-        let Some(o) = self.by_key(key).filter(|o| o.agent != "ssh") else { return };
+        let Some(o) = self.by_key(key).filter(|o| o.agent != "ssh" && o.agent != "agy") else { return };
         let (paths, id, agent) = (self.paths.clone(), o.id.clone(), o.agent.clone());
         let work = cx.background_spawn(async move {
             let homes = providers::homes(&paths);
@@ -262,9 +334,14 @@ impl CrewApp {
         let Some(key) = self.layout.focused_session() else { return };
         let Some(o) = self.by_key(key).filter(|o| !o.exited && o.agent != "ssh") else { return };
         let live = composer::read_screen(&o.agent, &o.view.read(cx).term.screen_text());
-        let codex = o.agent == "codex";
+        // Like Codex, Antigravity redraws the old values for a moment after a change.
+        let codex = o.agent == "codex" || o.agent == "agy";
         let Some(o) = self.open.iter_mut().find(|o| o.key == key) else { return };
-        let merged = live.over(&o.chips.live);
+        let mut merged = live.over(&o.chips.live);
+        if o.agent == "agy" && live.model.is_some() {
+            // Its status line names the effort with the model, so a model shown without one has none.
+            merged.effort = live.effort.clone();
+        }
         let changed = merged != o.chips.live;
         o.chips.live = merged;
         // A pick stays shown until the status line confirms it: Codex briefly redraws the old
@@ -336,7 +413,14 @@ impl CrewApp {
         } else {
             (self.model_label(agent, s.model.as_deref()), s.effort.as_deref().map_or(SharedString::default(), effort_label))
         };
-        let mode: SharedString = if let Some(p) = chips.codex_permission.as_ref().filter(|_| codex) {
+        let (model, effort) = if agent == "agy" && provider.is_none() {
+            (s.model.clone().map_or_else(|| t("Model").into(), Into::into), s.effort.as_deref().map_or(SharedString::default(), effort_label))
+        } else {
+            (model, effort)
+        };
+        let mode: SharedString = if agent == "agy" && matches!(s.mode.as_deref(), None | Some("manual")) {
+            t("Default").into()
+        } else if let Some(p) = chips.codex_permission.as_ref().filter(|_| codex) {
             crate::i18n::lookup(p).map_or_else(|| p.clone().into(), Into::into)
         } else if let Some(label) = s.mode.as_deref().and_then(mode_label) {
             t(label).into()
@@ -567,7 +651,9 @@ impl CrewApp {
                 .collect();
         }
         let current = o.chips.current().mode;
-        CLAUDE_MODES
+        let agent = if o.agent == "agy" { "agy" } else { "claude" };
+        let modes: &[(&str, &str)] = if agent == "agy" { &AGY_MODES } else { &CLAUDE_MODES };
+        modes
             .iter()
             .map(|(mode, label)| {
                 let on = current.as_deref() == Some(*mode) || (*mode == "manual" && current.as_deref() == Some("default"));
@@ -577,13 +663,88 @@ impl CrewApp {
                     cx.spawn(async move |_, cx| {
                         let _turn = queue.lock().await;
                         let ex = cx.background_executor().clone();
-                        set_claude_mode(&term, &ex, mode).await;
+                        set_mode(&term, &ex, agent, mode).await;
                     })
                     .detach();
                 })
                 .checked(on)
             })
             .collect()
+    }
+
+    /// Antigravity's model and effort menus, from its list; the picks go through its own /model and /effort.
+    fn agy_items(&mut self, key: u64, chip: Chip, o: &OpenSession, list: &Arc<Vec<crew_core::agy::AgyModel>>) -> Option<Vec<MenuEntry>> {
+        let now = o.chips.current();
+        let model_now = now.model.as_deref().unwrap_or("").to_lowercase();
+        // The status line may add the effort to a model that comes in one only: "GPT-OSS 120B (Medium)".
+        let current = list.iter().find(|m| model_now == m.label.to_lowercase()).or_else(|| list.iter().find(|m| model_now.starts_with(&m.label.to_lowercase())));
+        if chip == Chip::Model {
+            let mut items: Vec<MenuEntry> = list
+                .iter()
+                .map(|m| {
+                    let label = m.label.clone();
+                    let on = current.is_some_and(|c| c.label == m.label);
+                    entry(m.label.clone(), move |app, _, cx| app.pick_agy(key, label.clone(), None, cx)).checked(on)
+                })
+                .collect();
+            items.push(
+                entry("Refresh model list", |app, _, cx| {
+                    app.agy_list = None;
+                    app.fetch_agy_models(None, cx);
+                })
+                .separated(),
+            );
+            return Some(items);
+        }
+        let Some(model) = current.cloned() else {
+            self.hint = Some(t("Current model not found — use Refresh model list").to_string());
+            return None;
+        };
+        if model.efforts.len() < 2 {
+            self.hint = Some(format!("{} has no reasoning effort levels", model.label));
+            return None;
+        }
+        Some(
+            model
+                .efforts
+                .iter()
+                .map(|e| {
+                    let (label, level) = (model.label.clone(), e.clone());
+                    entry(effort_label(e), move |app, _, cx| app.pick_agy(key, label.clone(), Some(level.clone()), cx)).checked(now.effort.as_deref() == Some(e.as_str()))
+                })
+                .collect(),
+        )
+    }
+
+    /// A model (`effort` None) or an effort for the current model, through Antigravity's own menus.
+    fn pick_agy(&mut self, key: u64, model: String, effort: Option<String>, cx: &mut Context<Self>) {
+        let Some(o) = self.by_key(key) else { return };
+        let (term, queue) = (o.view.read(cx).term.clone(), o.chips.queue.clone());
+        let levels = self.agy_list.as_ref().and_then(|l| l.iter().find(|m| m.label == model)).map_or(Vec::new(), |m| m.efforts.clone());
+        if let Some(c) = self.chips_of(key) {
+            match &effort {
+                Some(e) => c.picked.effort = Some(e.clone()),
+                None => c.picked.model = Some(model.clone()),
+            }
+        }
+        cx.spawn(async move |this, cx| {
+            let _turn = queue.lock().await;
+            let ex = cx.background_executor().clone();
+            let result = match &effort {
+                Some(e) => select_agy_effort(&term, &ex, &levels, e).await,
+                None => select_agy_model(&term, &ex, &model).await,
+            };
+            let _ = this.update(cx, |app, cx| {
+                if let Err(why) = result {
+                    app.hint = Some(why);
+                    if let Some(c) = app.chips_of(key) {
+                        c.picked = Settings::default();
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn pick_codex_permission(&mut self, key: u64, label: &'static str, cx: &mut Context<Self>) {
@@ -630,6 +791,14 @@ impl CrewApp {
         }
         if let Some(provider) = o.provider.as_ref().and_then(|id| self.providers.iter().find(|p| p.id == *id)).cloned() {
             return self.provider_items(key, chip, o, &provider);
+        }
+        if o.agent == "agy" {
+            let Some(list) = self.agy_list.clone() else {
+                // The menu opens when the list arrives.
+                self.fetch_agy_models(Some((chip, at)), cx);
+                return None;
+            };
+            return self.agy_items(key, chip, o, &list);
         }
         if o.agent != "codex" {
             return match chip {
@@ -758,12 +927,13 @@ impl CrewApp {
     fn project_chip_menu(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(o) = self.active() else { return };
         let cwd = o.cwd.clone();
-        let (a, b, c, d) = (cwd.clone(), cwd.clone(), cwd.clone(), cwd);
+        let (a, b, e, c, d) = (cwd.clone(), cwd.clone(), cwd.clone(), cwd.clone(), cwd);
         self.open_menu_above(
             at,
             vec![
                 entry("New Claude session here", move |app, window, cx| app.new_session("claude", a.clone(), window, cx)),
                 entry("New Codex session here", move |app, window, cx| app.new_session("codex", b.clone(), window, cx)),
+                entry("New Antigravity session here", move |app, window, cx| app.new_session("agy", e.clone(), window, cx)),
                 entry("Open folder", move |_, _, cx| cx.open_with_system(&c)),
                 entry("Copy path", move |app, _, cx| app.copy_text(d.to_string_lossy(), cx)),
             ],
@@ -981,7 +1151,8 @@ impl CrewApp {
 
     pub(super) fn update_suggest(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.layout.focused_session() else { return self.hide_suggest(cx) };
-        let Some(o) = self.by_key(key).filter(|o| o.agent != "ssh") else { return self.hide_suggest(cx) };
+        // agy's skills and commands are its own: it suggests them itself.
+        let Some(o) = self.by_key(key).filter(|o| o.agent != "ssh" && o.agent != "agy") else { return self.hide_suggest(cx) };
         let (codex, cwd) = (o.agent == "codex", o.cwd.clone());
         let (value, range) = {
             let c = self.composer.read(cx);

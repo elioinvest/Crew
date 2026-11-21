@@ -65,6 +65,8 @@ fn defaults() -> Map<String, Value> {
         "extraArgs": "",
         "codexCommand": "codex",
         "codexArgs": "",
+        "agyCommand": "agy",
+        "agyArgs": "",
         "defaultAgent": "claude",
         "theme": "light",
         "fontSize": 14,

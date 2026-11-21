@@ -28,6 +28,7 @@ pub fn t(text: &'static str) -> &'static str {
     }
     match text {
         "Search" => "搜索",
+        "Copied" => "已复制",
         "Ask anything. @ files, $ skills, / commands" => "问任何事。@ 文件，$ 技能，/ 命令",
         "New session" => "新建会话",
         "Working…" => "工作中…",
@@ -36,6 +37,7 @@ pub fn t(text: &'static str) -> &'static str {
         "Active" => "当前",
         "Start Claude" => "启动 Claude",
         "Start Codex" => "启动 Codex",
+        "Start Antigravity" => "启动 Antigravity",
         "Hosts" => "主机",
         "Agents" => "智能体",
         "Usage" => "用量",
@@ -47,7 +49,7 @@ pub fn t(text: &'static str) -> &'static str {
         "Checking plan usage…" => "正在检查套餐用量…",
         "Cancel" => "取消",
         "OK" => "好",
-        "Save" => "保存",
+        "Save" => "保存", "Preview" => "预览", "Source" => "源码",
         "Delete" => "删除",
         "Edit" => "编辑",
         "Terminal" => "终端",

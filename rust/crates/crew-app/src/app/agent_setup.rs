@@ -1,4 +1,4 @@
-//! Crew runs the agents' own `claude` / `codex` commands and never bundles them. If one isn't
+//! Crew runs the agents' own `claude` / `codex` / `agy` commands and never bundles them. If one isn't
 //! installed, this says what to install and can run the official installer, then starts the session.
 
 use crew_core::env as crew_env;
@@ -31,8 +31,21 @@ const CODEX: AgentInstall = AgentInstall {
     needs_npm: true,
 };
 
+/// Antigravity has no installer to run from here: its page says how.
+const AGY: AgentInstall = AgentInstall {
+    name: "Antigravity",
+    page: "https://antigravity.google/docs",
+    argv: &[],
+    display: "https://antigravity.google/docs",
+    needs_npm: false,
+};
+
 fn install_of(agent: &str) -> &'static AgentInstall {
-    if agent == "codex" { &CODEX } else { &CLAUDE }
+    match agent {
+        "codex" => &CODEX,
+        "agy" => &AGY,
+        _ => &CLAUDE,
+    }
 }
 
 /// A session that couldn't start for lack of its agent, with what it takes to start it again.
@@ -57,7 +70,11 @@ pub(super) struct MissingAgent {
 impl CrewApp {
     /// The command as it's set, which runs as one path even with spaces in it.
     fn agent_command(&self, agent: &str) -> String {
-        let (key, plain) = if agent == "codex" { ("codexCommand", "codex") } else { ("claudeCommand", "claude") };
+        let (key, plain) = match agent {
+            "codex" => ("codexCommand", "codex"),
+            "agy" => ("agyCommand", "agy"),
+            _ => ("claudeCommand", "claude"),
+        };
         Some(self.config.str(key).trim().trim_matches('"').to_string()).filter(|c| !c.is_empty()).unwrap_or_else(|| plain.to_string())
     }
 
@@ -159,7 +176,9 @@ impl CrewApp {
         let info = install_of(&m.start.agent);
         let page = info.page;
         let line = |text: String| div().text_size(px(13.)).text_color(c.muted).child(text);
-        let main = if m.npm_missing {
+        let main = if info.argv.is_empty() {
+            self.button("agent-install", t("Install guide"), true).on_click(cx.listener(move |_, _, _, cx| cx.open_url(page))).into_any_element()
+        } else if m.npm_missing {
             self.button("agent-get-node", t("Get Node.js"), true).on_click(cx.listener(|_, _, _, cx| cx.open_url("https://nodejs.org/"))).into_any_element()
         } else {
             self.button("agent-install", format!("Install {}", info.name), true).on_click(cx.listener(|app, _, window, cx| app.install_agent(window, cx))).into_any_element()
@@ -173,7 +192,13 @@ impl CrewApp {
                 .gap(px(10.))
                 .child(div().text_size(px(16.)).font_weight(gpui::FontWeight::SEMIBOLD).child(format!("{} isn't installed", info.name)))
                 .child(line(format!("Crew runs the official {} command, and it wasn't found on this computer.", m.command)))
-                .child(line(if m.npm_missing { format!("{} installs with npm, which comes with Node.js. Install Node.js, then click Check again.", info.name) } else { t("It can be installed with:").to_string() }))
+                .child(line(if m.npm_missing {
+                    format!("{} installs with npm, which comes with Node.js. Install Node.js, then click Check again.", info.name)
+                } else if info.argv.is_empty() {
+                    format!("{} installs from its page:", info.name)
+                } else {
+                    t("It can be installed with:").to_string()
+                }))
                 .child(div().px(px(10.)).py(px(8.)).rounded(px(6.)).bg(c.hover).text_size(px(12.5)).font_family(crate::terminal_view::FONT_FAMILY).child(info.display))
                 .when_some(m.note.clone(), |d, note| d.child(div().text_size(px(13.)).text_color(gpui::rgb(0xd93d42)).child(note)))
                 .child(
@@ -182,7 +207,7 @@ impl CrewApp {
                         .gap(px(8.))
                         .mt(px(4.))
                         .child(main)
-                        .child(self.button("agent-guide", t("Install guide"), false).on_click(cx.listener(move |_, _, _, cx| cx.open_url(page))))
+                        .when(!info.argv.is_empty(), |d| d.child(self.button("agent-guide", t("Install guide"), false).on_click(cx.listener(move |_, _, _, cx| cx.open_url(page)))))
                         .child(self.button("agent-recheck", t("Check again"), false).on_click(cx.listener(|app, _, window, cx| app.check_agent_again(window, cx))))
                         .child(self.button("agent-cancel", t("Close"), false).on_click(cx.listener(|app, _, _, cx| {
                             app.missing_agent = None;

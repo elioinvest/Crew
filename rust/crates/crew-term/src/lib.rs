@@ -675,6 +675,10 @@ impl Terminal {
         self.shared.changed();
     }
 
+    pub fn has_selection(&self) -> bool {
+        self.term.lock().selection.is_some()
+    }
+
     pub fn clear_selection(&self) {
         self.term.lock().selection = None;
         self.shared.changed();

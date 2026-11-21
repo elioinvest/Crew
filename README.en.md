@@ -56,7 +56,7 @@ You don't have to do this in advance. If you start a session for an agent that i
 
 - Links in the conversation open in the built-in browser beside it. **Ctrl+click** opens them in your default browser instead.
 - The globe button at the top right shows or hides the browser. It has tabs (**Ctrl+T**, **Ctrl+W**, **Ctrl+Tab**) and keeps you signed in to websites.
-- Image paths in the conversation open in a viewer. Other file paths open in their default program.
+- Image paths in the conversation open in a viewer. Other file paths open in Crew's file viewer; HTML and Markdown are previewed in their own formats.
 - **Agents' browser:** Crew integrates [ego lite](https://github.com/citrolabs/ego-lite), a free browser built for agents, the way ego intends: with ego's official `ego-browser` skill, agents use ego lite for anything that needs a browser (sites, forms, sign-ins, screenshots, testing web apps), each in its own Space without taking over your screen. When a step needs you (a sign-in, a code), the agent pauses and tells you which Space to open. Settings shows whether ego lite and its official skill are installed, with buttons to download ego lite and to run its official skill installer.
 
 ### Files

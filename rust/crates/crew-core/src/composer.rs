@@ -588,6 +588,36 @@ pub fn read_screen(agent: &str, lines: &[String]) -> Settings {
         }
         return live;
     }
+    if agent == "agy" {
+        // "? for shortcuts      Gemini 3.8 Flash · high", or "Plan mode: … (shift+tab to cycle)" on the left.
+        static RIGHT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s{2,}(\S[^·]*?)(?:\s+·\s+(minimal|low|medium|high|xhigh|max))?\s*$").unwrap());
+        // It draws below what's been said, not at the window's foot, so the lowest one counts.
+        let Some(at) = lines.iter().rposition(|l| l.contains("? for shortcuts") || l.contains("(shift+tab to cycle)")) else { return live };
+        // In a narrow pane the model wraps onto the line below, which is otherwise empty.
+        let status = match lines.get(at + 1).filter(|l| !l.trim().is_empty()) {
+            Some(rest) => format!("{}{}", lines[at].trim_end_matches(' '), rest.trim_end()),
+            None => lines[at].clone(),
+        };
+        live.mode = Some(
+            if status.contains("Plan mode:") {
+                "plan"
+            } else if status.contains("Accept-edits mode:") {
+                "acceptEdits"
+            } else if status.contains("Auto mode:") {
+                "auto"
+            } else if status.contains("Best-of-N mode:") {
+                "bestOfN"
+            } else {
+                "manual"
+            }
+            .to_string(),
+        );
+        if let Some(m) = RIGHT.captures(status.trim_start()) {
+            live.model = Some(m[1].trim().to_string());
+            live.effort = m.get(2).map(|e| e.as_str().to_string());
+        }
+        return live;
+    }
     let lower = text.to_lowercase();
     live.mode = if lower.contains("auto mode on") {
         Some("auto")
@@ -978,6 +1008,21 @@ mod tests {
         let s = read_screen("codex", &lines);
         assert_eq!((s.model.as_deref(), s.effort.as_deref()), (Some("gpt-6-luna"), Some("high")));
         assert_eq!(prompt_text(&["a".to_string(), "❯ typed".to_string()]).as_deref(), Some("typed"));
+    }
+
+    #[test]
+    fn reads_agy_status_lines() {
+        let at_bottom = |status: &str| vec!["> ".to_string(), "─────".to_string(), status.to_string()];
+        let s = read_screen("agy", &at_bottom("? for shortcuts                     Gemini 3.8 Flash · high"));
+        assert_eq!((s.model.as_deref(), s.effort.as_deref(), s.mode.as_deref()), (Some("Gemini 3.8 Flash"), Some("high"), Some("manual")));
+        let s = read_screen("agy", &at_bottom("Plan mode: research & plan only (shift+tab to cycle)    Claude Opus 4.6 (Thinking)"));
+        assert_eq!((s.model.as_deref(), s.effort.as_deref(), s.mode.as_deref()), (Some("Claude Opus 4.6 (Thinking)"), None, Some("plan")));
+        let s = read_screen("agy", &at_bottom("Accept-edits mode: file edits auto-approved (shift+tab to cycle)  Gemini 3.8 Flash · low"));
+        assert_eq!((s.effort.as_deref(), s.mode.as_deref()), (Some("low"), Some("acceptEdits")));
+        assert_eq!(read_screen("agy", &at_bottom("Thinking…")), Settings::default());
+        let wrapped = vec!["Plan mode: research & plan only (shift+tab to cycle)  Gemini 3.".to_string(), "8 Flash · low".to_string()];
+        let s = read_screen("agy", &wrapped);
+        assert_eq!((s.model.as_deref(), s.effort.as_deref(), s.mode.as_deref()), (Some("Gemini 3.8 Flash"), Some("low"), Some("plan")));
     }
 
     #[test]

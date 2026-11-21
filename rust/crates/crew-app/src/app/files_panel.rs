@@ -6,6 +6,7 @@
 use crew_core::files::{self, Content, Hit};
 use gpui::{ObjectFit, StyledImage};
 use gpui_component::input::{Editor, EditorState, Position};
+use gpui_component::text::TextView;
 
 use super::overlays::{Action, ToastKind};
 use super::*;
@@ -46,10 +47,25 @@ enum Shown {
     Loading,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreviewFormat {
+    Html,
+    Markdown,
+}
+
+fn preview_format(rel: &str) -> Option<PreviewFormat> {
+    match rel.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "html" | "htm" => Some(PreviewFormat::Html),
+        "md" | "markdown" | "mdown" | "mkd" | "mdx" => Some(PreviewFormat::Markdown),
+        _ => None,
+    }
+}
+
 pub(super) struct FileView {
     pub(super) root: PathBuf,
     pub(super) rel: String,
     shown: Shown,
+    preview: bool,
 }
 
 /// The highlighter's name for a file's type: its extension, or its name for files like Makefile.
@@ -226,7 +242,7 @@ impl CrewApp {
         }
     }
 
-    fn show_file(&mut self, root: PathBuf, rel: String, line: Option<usize>, cx: &mut Context<Self>) {
+    pub(super) fn show_file(&mut self, root: PathBuf, rel: String, line: Option<usize>, cx: &mut Context<Self>) {
         self.leave_edits(
             Rc::new(move |app: &mut CrewApp, window: &mut Window, cx: &mut Context<CrewApp>| {
                 app.load_file(root.clone(), rel.clone(), line, window, cx);
@@ -239,7 +255,8 @@ impl CrewApp {
         if let Some(f) = self.files.as_mut() {
             f.selected = Some(rel.clone());
         }
-        self.file_view = Some(FileView { root: root.clone(), rel: rel.clone(), shown: Shown::Loading });
+        let preview = preview_format(&rel).is_some();
+        self.file_view = Some(FileView { root: root.clone(), rel: rel.clone(), shown: Shown::Loading, preview });
         self.show_file_pane(window, cx);
         let (read_root, read_rel) = (root, rel.clone());
         let read = cx.background_spawn(async move { files::read(&read_root, &read_rel) });
@@ -301,7 +318,7 @@ impl CrewApp {
     }
 
     pub(super) fn save_file(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(FileView { root, rel, shown: Shown::Editing { editor, saved, crlf, dirty, .. } }) = self.file_view.as_mut() else { return true };
+        let Some(FileView { root, rel, shown: Shown::Editing { editor, saved, crlf, dirty, .. }, .. }) = self.file_view.as_mut() else { return true };
         if !*dirty {
             return true;
         }
@@ -352,7 +369,19 @@ impl CrewApp {
         let full = f.root.join(&f.rel);
         let message = |text: String| div().flex().flex_1().items_center().justify_center().text_size(px(13.)).text_color(c.muted).child(text);
         let body = match &f.shown {
-            Shown::Editing { editor, .. } => div().flex_1().min_h(px(0.)).child(Editor::new(editor).h_full().appearance(false).font_family("Cascadia Mono").text_size(px(self.config.f32("fontSize", 14.)))).into_any_element(),
+            Shown::Editing { editor, .. } => {
+                if let Some(format) = preview_format(&f.rel).filter(|_| f.preview) {
+                    let text = editor.read(cx).value().to_string();
+                    let id = gpui::ElementId::Name(gpui::SharedString::from(format!("file-preview:{}", f.rel)));
+                    let view = match format {
+                        PreviewFormat::Html => TextView::html(id, text),
+                        PreviewFormat::Markdown => TextView::markdown(id, text),
+                    };
+                    div().flex_1().min_h(px(0.)).p(px(24.)).child(view.selectable(true).scrollable(true).text_size(px(self.config.f32("fontSize", 14.)))).into_any_element()
+                } else {
+                    div().flex_1().min_h(px(0.)).child(Editor::new(editor).h_full().appearance(false).font_family("Cascadia Mono").text_size(px(self.config.f32("fontSize", 14.)))).into_any_element()
+                }
+            }
             Shown::Image(path) => div().flex().flex_1().min_h(px(0.)).p(px(16.)).items_center().justify_center().child(img(path.clone()).size_full().object_fit(ObjectFit::Contain)).into_any_element(),
             Shown::Message(why) => message(why.clone()).into_any_element(),
             Shown::Loading => message(t("Loading…").to_string()).into_any_element(),
@@ -377,6 +406,14 @@ impl CrewApp {
                     .when(dirty, |d| {
                         d.child(div().flex_none().text_color(c.accent).child("●")).child(self.button("file-save", t("Save"), true).py(px(2.)).on_click(cx.listener(|app, _, _, cx| {
                             app.save_file(cx);
+                        })))
+                    })
+                    .when(preview_format(&f.rel).is_some() && matches!(&f.shown, Shown::Editing { .. }), |d| {
+                        d.child(self.button("file-preview-toggle", if f.preview { t("Source") } else { t("Preview") }, false).py(px(2.)).on_click(cx.listener(|app, _, _, cx| {
+                            if let Some(file) = app.file_view.as_mut() {
+                                file.preview = !file.preview;
+                            }
+                            cx.notify();
                         })))
                     })
                     .child(self.icon_button("file-open-external", IconName::ExternalLink).p(px(3.)).on_click(cx.listener(move |_, _, _, cx| cx.open_with_system(&full)))),
@@ -601,5 +638,14 @@ mod tests {
         assert_eq!(language_of("Makefile"), "make");
         assert_eq!(language_of(".env"), "bash");
         assert_eq!(language_of("notes.unknown"), "text");
+    }
+
+    #[test]
+    fn preview_format_by_extension() {
+        assert_eq!(preview_format("index.html"), Some(PreviewFormat::Html));
+        assert_eq!(preview_format("a/B.HTM"), Some(PreviewFormat::Html));
+        assert_eq!(preview_format("README.md"), Some(PreviewFormat::Markdown));
+        assert_eq!(preview_format("docs/guide.markdown"), Some(PreviewFormat::Markdown));
+        assert_eq!(preview_format("src/main.rs"), None);
     }
 }

@@ -57,7 +57,7 @@ impl Section {
         match self {
             Section::General => &["Window behavior and how Crew runs in the background.", "Keep running in the tray when the window is closed", "Sessions keep running after you close the window.", "Plan usage", "Show plan usage at the bottom. Claude sessions Crew starts get a status line hook that records it."],
             Section::Appearance => &["Theme, text size and the interface language.", "Theme", "Light or dark interface.", "Font size", "Terminal and editor text size.", "Language", "Interface language. Automatic follows Windows."],
-            Section::Agents => &["Commands and arguments for the Claude Code and Codex CLIs.", "Claude command", "Claude arguments", "Codex command", "Codex arguments"],
+            Section::Agents => &["Commands and arguments for the Claude Code and Codex CLIs.", "Claude command", "Claude arguments", "Codex command", "Codex arguments", "Antigravity command", "Antigravity arguments"],
             Section::Providers => &["Your own APIs: relays, self-hosted services and other OpenAI- or Anthropic-compatible endpoints. Each one appears in the New session menus.", "Model providers"],
             Section::Phone => &["Use Crew from the Crew app on your phone: see the open sessions, type into them, start sessions and answer approvals. On the same Wi-Fi, or from anywhere through Tailscale.", "Let paired phones connect"],
             Section::Git => &["Worktree directory", "Worktree setup command"],
@@ -86,6 +86,8 @@ pub(super) struct SettingsPage {
     claude_args: Entity<InputState>,
     codex_command: Entity<InputState>,
     codex_args: Entity<InputState>,
+    agy_command: Entity<InputState>,
+    agy_args: Entity<InputState>,
     worktree_dir: Entity<InputState>,
     worktree_setup: Entity<InputState>,
     font_size: Entity<InputState>,
@@ -153,6 +155,8 @@ impl CrewApp {
             claude_args: plain(text(&config, "extraArgs"), "e.g. --model opus", window, cx),
             codex_command: plain(text(&config, "codexCommand"), "", window, cx),
             codex_args: plain(text(&config, "codexArgs"), "e.g. -m gpt-5.5", window, cx),
+            agy_command: plain(text(&config, "agyCommand"), "", window, cx),
+            agy_args: plain(text(&config, "agyArgs"), "", window, cx),
             worktree_dir: plain(text(&config, "worktreeDirectory"), "../worktrees", window, cx),
             worktree_setup: plain(text(&config, "worktreeSetup"), "e.g. copy %CREW_MAIN_GIT_WORKTREE%\\.env .", window, cx),
             font_size: plain((config.f32("fontSize", 14.) as i64).to_string(), "", window, cx),
@@ -231,6 +235,8 @@ impl CrewApp {
             ("extraArgs", json!(value(&s.claude_args))),
             ("codexCommand", json!(or(value(&s.codex_command), "codex"))),
             ("codexArgs", json!(value(&s.codex_args))),
+            ("agyCommand", json!(or(value(&s.agy_command), "agy"))),
+            ("agyArgs", json!(value(&s.agy_args))),
             ("worktreeDirectory", json!(value(&s.worktree_dir))),
             ("worktreeSetup", json!(value(&s.worktree_setup))),
             ("theme", json!(s.theme)),
@@ -357,6 +363,11 @@ impl CrewApp {
                     self.settings_card()
                         .child(self.settings_row("Codex command", "The Codex executable Crew starts.", wide(&s.codex_command)))
                         .child(self.settings_row("Codex arguments", "Extra arguments passed on every Codex session.", wide(&s.codex_args))),
+                )
+                .child(
+                    self.settings_card()
+                        .child(self.settings_row("Antigravity command", "The agy executable Crew starts.", wide(&s.agy_command)))
+                        .child(self.settings_row("Antigravity arguments", "Extra arguments passed on every Antigravity session.", wide(&s.agy_args))),
                 ),
             Section::Git => body.child(self.panel_head("Git", "")).child(
                 self.settings_card()

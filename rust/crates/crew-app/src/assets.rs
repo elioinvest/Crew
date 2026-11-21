@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use gpui::{AssetSource, Image, ImageFormat, Result, SharedString};
 
-pub const 
 pub const GIT_BRANCH: &str = "crew/git-branch.svg";
 pub const FOLDER_PLUS: &str = "crew/folder-plus.svg";
 pub const SPLIT_RIGHT: &str = "crew/split-right.svg";
@@ -22,6 +21,12 @@ pub const FILES: &str = "crew/files.svg";
 pub const GLOBE: &str = "crew/globe.svg";
 pub const PLUG: &str = "crew/plug.svg";
 pub const PHONE: &str = "crew/phone.svg";
+
+/// agy's mark, in its own colours.
+pub fn agy_logo() -> Arc<Image> {
+    static LOGO: std::sync::LazyLock<Arc<Image>> = std::sync::LazyLock::new(|| Arc::new(Image::from_bytes(ImageFormat::Png, include_bytes!("../assets/icons/agy.png").to_vec())));
+    LOGO.clone()
+}
 
 /// The app's own mark, in colour: icons above are masks that take the text's colour.
 pub fn logo() -> Arc<Image> {

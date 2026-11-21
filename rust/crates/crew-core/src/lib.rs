@@ -2,6 +2,7 @@
 //! agents start. It keeps its settings and lists in plain files in the data folder.
 
 pub mod agents;
+pub mod agy;
 pub mod browser;
 pub mod composer;
 pub mod config;

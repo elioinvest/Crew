@@ -75,6 +75,10 @@ pub struct TerminalView {
     cell: gpui::Size<Pixels>,
     scroll_rest: f32,
     selecting: bool,
+    /// While selecting, its two ends (column, row, right half; and whether by words), to bring it
+    /// back when the program redraws over it: a redraw clears a selection on the lines it rewrites.
+    select_from: (usize, usize, bool, bool),
+    select_to: (usize, usize, bool),
     exited: bool,
     palette: Palette,
     busy: bool,
@@ -83,6 +87,9 @@ pub struct TerminalView {
     mouse: Option<Point<Pixels>>,
     hover: Option<HoverLink>,
     pressed_link: Option<HoverLink>,
+    /// A left press held back from a program that takes the mouse: a click goes on to it, a drag
+    /// selects text instead. Its cell: column, row, right half.
+    held_press: Option<(usize, usize, bool)>,
     /// What the scrollbar shows, from the last drawing: history lines, how far up, lines on screen.
     scrolled: (usize, usize, usize),
     /// While dragging the scrollbar: where in the thumb it was taken.
@@ -112,6 +119,8 @@ pub enum TerminalEvent {
     OpenLink(LinkTarget, bool),
     /// The mouse went onto an "[Image #N]", with its line's text; or off it.
     HoverImage(Option<(u32, String, Point<Pixels>)>),
+    /// A selection went to the clipboard.
+    Copied,
 }
 
 impl gpui::EventEmitter<TerminalEvent> for TerminalView {}
@@ -160,6 +169,8 @@ impl TerminalView {
             cell: size(px(8.), px(16.)),
             scroll_rest: 0.,
             selecting: false,
+            select_from: (0, 0, false, false),
+            select_to: (0, 0, false),
             exited: false,
             palette,
             busy: false,
@@ -167,6 +178,7 @@ impl TerminalView {
             mouse: None,
             hover: None,
             pressed_link: None,
+            held_press: None,
             scrolled: (0, 0, 0),
             bar_grab: None,
             program_drag: None,
@@ -441,7 +453,13 @@ impl TerminalView {
         self.pressed_link = if e.button == MouseButton::Left { self.link_at(e.position) } else { None };
         let (col, row, right) = self.cell_at(e.position);
         let mode = self.term.mode();
+        self.held_press = None;
         if mode.intersects(Mode::MOUSE_MODE) && !e.modifiers.shift {
+            if e.button == MouseButton::Left {
+                self.term.clear_selection();
+                self.held_press = Some((col, row, right));
+                return;
+            }
             let button = match e.button {
                 MouseButton::Left => 0,
                 MouseButton::Middle => 1,
@@ -452,8 +470,7 @@ impl TerminalView {
             return;
         }
         if e.button == MouseButton::Left {
-            self.term.start_selection(col, row, right, e.click_count == 2);
-            self.selecting = true;
+            self.begin_selection(col, row, right, e.click_count == 2);
             cx.notify();
         }
     }
@@ -465,12 +482,40 @@ impl TerminalView {
             self.bar_hovered = over_bar;
             cx.notify();
         }
+        if let Some((col, row, right)) = self.held_press {
+            let (now_col, now_row, _) = self.cell_at(e.position);
+            if e.pressed_button != Some(MouseButton::Left) {
+                self.held_press = None;
+            } else if (now_col, now_row) != (col, row) {
+                self.held_press = None;
+                self.begin_selection(col, row, right, false);
+            }
+        }
         if self.selecting {
             let (col, row, right) = self.cell_at(e.position);
+            self.select_to = (col, row, right);
+            self.keep_selection();
             self.term.update_selection(col, row, right);
             cx.notify();
         }
         self.refresh_hover(cx);
+    }
+
+    fn begin_selection(&mut self, col: usize, row: usize, right: bool, word: bool) {
+        self.term.start_selection(col, row, right, word);
+        self.selecting = true;
+        self.select_from = (col, row, right, word);
+        self.select_to = (col, row, right);
+    }
+
+    /// Puts the selection being made back if the program's output took it away.
+    fn keep_selection(&self) {
+        if !self.selecting || self.term.has_selection() {
+            return;
+        }
+        let ((col, row, right, word), (to_col, to_row, to_right)) = (self.select_from, self.select_to);
+        self.term.start_selection(col, row, right, word);
+        self.term.update_selection(to_col, to_row, to_right);
     }
 
     /// Pressed and released on the same link, without dragging out a selection, opens it.
@@ -489,6 +534,14 @@ impl TerminalView {
             return;
         }
         self.finish_link_click(e, cx);
+        if let Some((col, row, _)) = self.held_press.take() {
+            // Not dragged: the program gets its click after all.
+            if self.term.mode().intersects(Mode::MOUSE_MODE) {
+                self.mouse_report(0, col, row, true);
+                self.mouse_report(0, col, row, false);
+            }
+            return;
+        }
         let mode = self.term.mode();
         if mode.intersects(Mode::MOUSE_MODE) && !e.modifiers.shift && !self.selecting {
             let (col, row, _) = self.cell_at(e.position);
@@ -502,10 +555,17 @@ impl TerminalView {
             return;
         }
         if self.selecting {
+            self.keep_selection();
             self.selecting = false;
-            // A click without a drag selects nothing.
-            if self.term.selected_text().is_none() {
-                self.term.clear_selection();
+            // Copied as soon as it's made: the agents redraw their screens all the time, and a
+            // redraw over the selection takes it away before Ctrl+C would come.
+            match self.term.selected_text() {
+                Some(text) => {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    cx.emit(TerminalEvent::Copied);
+                }
+                // A click without a drag selects nothing.
+                None => self.term.clear_selection(),
             }
             self.refresh_hover(cx);
             cx.notify();
@@ -872,6 +932,7 @@ impl Element for TerminalElement {
             v.bounds = bounds;
             v.cell = cell;
             v.term.resize(cols, rows, f32::from(width) as u16, f32::from(height) as u16);
+            v.keep_selection();
             let screen = v.term.screen();
             v.scrolled = (screen.history, screen.display_offset, screen.rows.len());
             screen
