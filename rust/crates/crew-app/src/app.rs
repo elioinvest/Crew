@@ -56,7 +56,6 @@ mod usage_page;
 const FILE_KEY: u64 = u64::MAX;
 const UI_FONT: &str = "Segoe UI";
 /// How far sessions sit in from their agent group.
-const SESSION_INDENT: f32 = 16.;
 const SIDEBAR_WIDTH: f32 = 300.;
 const SIDEBAR_MIN: f32 = 200.;
 const SIDEBAR_MAX: f32 = 560.;
@@ -67,6 +66,8 @@ const SESSIONS_SHOWN: usize = 8;
 const USAGE_TICK: Duration = Duration::from_secs(30);
 const CODEX_CHECK_EVERY: Duration = Duration::from_secs(2 * 60);
 const CLAUDE_CHECK_EVERY: Duration = Duration::from_secs(5 * 60);
+/// Antigravity's limits are weekly: a check now and then is plenty.
+const AGY_CHECK_EVERY: Duration = Duration::from_secs(10 * 60);
 const TOKENS_EVERY: Duration = Duration::from_secs(5 * 60);
 
 struct OpenSession {
@@ -135,10 +136,12 @@ pub struct CrewApp {
     /// Agent groups showing all their sessions.
     show_all: HashSet<String>,
     plan_claude: Option<PlanUsage>,
+    plan_agy: Option<PlanUsage>,
     plan_codex: Option<PlanUsage>,
     today: Option<Today>,
     scanner: Arc<Mutex<UsageScanner>>,
     claude_checked: Option<Instant>,
+    agy_checked: Option<Instant>,
     codex_checked: Option<Instant>,
     tokens_checked: Option<Instant>,
     /// Checks the refresh button is waiting for.
@@ -177,6 +180,8 @@ pub struct CrewApp {
     installing: Option<(u64, agent_setup::PendingStart)>,
     /// The project a dragged one would land next to, and whether after it.
     project_drop: Option<(PathBuf, bool)>,
+    /// Where a session dragged within its project would land: next to this one, after it or not.
+    session_drop: Option<(String, bool)>,
     saved_layout: Value,
     /// Sessions with a live agent anywhere on this machine, and whether each is working.
     live_elsewhere: HashMap<String, bool>,
@@ -200,17 +205,6 @@ pub struct CrewApp {
     /// What's waiting for the next draw, which has a window to act on.
     deferred_action: Option<overlays::Action>,
     _subscriptions: Vec<gpui::Subscription>,
-}
-
-/// One group of a project's sessions: an agent, or a custom provider.
-struct SessionGroup<'a> {
-    key: String,
-    label: String,
-    icon: AnyElement,
-    /// What its + starts.
-    agent: &'static str,
-    provider: Option<String>,
-    sessions: Vec<&'a Session>,
 }
 
 fn data_url_image(url: &str) -> Option<Arc<Image>> {
@@ -244,16 +238,24 @@ fn window_name(minutes: i64) -> String {
 
 /// A plan's limits in full, for hovering its item in the status bar.
 fn usage_details(agent: &str, plan: &PlanUsage, windows: &[PlanWindow], now: i64) -> String {
-    let name = if agent == "codex" { "Codex" } else { "Claude" };
+    let name = match agent {
+        "codex" => "Codex",
+        "agy" => "Antigravity",
+        _ => "Claude",
+    };
     let mut lines = vec![match &plan.plan {
         Some(p) => format!("{name} ({p} plan)"),
         None => name.to_string(),
     }];
     for w in windows {
-        let limit = if w.minutes == 10080 {
+        let length = if w.minutes == 10080 {
             "Weekly".to_string()
         } else {
             window_name(w.minutes)
+        };
+        let limit = match &w.label {
+            Some(group) => format!("{group} {}", length.to_lowercase()),
+            None => length,
         };
         let reset = w.resets_at.map_or(String::new(), |at| {
             let when = chrono::TimeZone::timestamp_millis_opt(&chrono::Local, at)
@@ -435,10 +437,12 @@ impl CrewApp {
             provider_images: HashMap::new(),
             show_all: HashSet::new(),
             plan_claude: None,
+            plan_agy: None,
             plan_codex: None,
             today: None,
             scanner: Arc::default(),
             claude_checked: None,
+            agy_checked: None,
             codex_checked: None,
             tokens_checked: None,
             usage_forced: 0,
@@ -472,6 +476,7 @@ impl CrewApp {
             missing_agent: None,
             installing: None,
             project_drop: None,
+            session_drop: None,
             saved_layout: saved_layout_shape,
             live_elsewhere: HashMap::new(),
             claude_catalog: None,
@@ -687,13 +692,15 @@ impl CrewApp {
             (
                 usage::claude_from_hook(&paths),
                 usage::codex_from_logs(&paths),
+                usage::agy_saved(&paths),
             )
         });
         cx.spawn(async move |this, cx| {
-            let (claude, codex) = saved.await;
+            let (claude, codex, agy) = saved.await;
             let _ = this.update(cx, |app, cx| {
                 app.plan_claude = usage::newest(app.plan_claude.take(), claude);
                 app.plan_codex = usage::newest(app.plan_codex.take(), codex);
+                app.plan_agy = usage::newest(app.plan_agy.take(), agy);
                 cx.notify();
             });
         })
@@ -724,6 +731,30 @@ impl CrewApp {
                 let live = check.await;
                 let _ = this.update(cx, |app, cx| {
                     app.plan_claude = usage::newest(app.plan_claude.take(), live);
+                    app.usage_forced -= usize::from(force);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        // Only once Antigravity has been used (it keeps a list of conversations): checking starts its
+        // CLI. Known at once, unlike the sessions, which load a moment after startup.
+        let uses_agy = crew_core::agy::index(&self.paths).exists();
+        if front && uses_agy && (force || due(self.agy_checked, AGY_CHECK_EVERY)) {
+            self.agy_checked = Some(Instant::now());
+            let (config, paths) = (self.config.clone(), self.paths.clone());
+            let check = cx.background_spawn(async move {
+                let live = usage_probe::agy(&config, &paths);
+                if let Some(u) = &live {
+                    usage::save_agy(&paths, u); // shown at once next time Crew starts
+                }
+                live
+            });
+            self.usage_forced += usize::from(force);
+            cx.spawn(async move |this, cx| {
+                let live = check.await;
+                let _ = this.update(cx, |app, cx| {
+                    app.plan_agy = usage::newest(app.plan_agy.take(), live);
                     app.usage_forced -= usize::from(force);
                     cx.notify();
                 });
@@ -1699,18 +1730,6 @@ impl CrewApp {
         cx.notify();
     }
 
-    fn toggle_collapsed(&mut self, key: &str, cx: &mut Context<Self>) {
-        self.config.toggle_collapsed(key);
-        let collapsed = self
-            .config
-            .raw()
-            .get("collapsed")
-            .cloned()
-            .unwrap_or(json!({}));
-        self.save_setting("collapsed", collapsed);
-        cx.notify();
-    }
-
     fn toggle_setting(&mut self, key: &str, cx: &mut Context<Self>) {
         let on = !self.config.bool(key);
         self.save_setting(key, json!(on));
@@ -1824,6 +1843,21 @@ impl CrewApp {
             return row;
         }
         let title = session.title.clone().unwrap_or_default();
+        let (agent_icon, agent_name) = self.session_agent(session);
+        let tree = session.worktree.as_ref().map(|w| {
+            let archived = w.archived_id.is_some();
+            div()
+                .flex_none()
+                .max_w(px(120.))
+                .truncate()
+                .px(px(5.))
+                .rounded(px(4.))
+                .bg(c.hover)
+                .text_size(px(11.5))
+                .text_color(c.muted)
+                .when(archived, |d| d.opacity(0.6))
+                .child(w.name.clone())
+        });
         let s = session.clone();
         let (menu_session, menu_project, more_session, more_project) = (
             session.clone(),
@@ -1846,14 +1880,13 @@ impl CrewApp {
             "session-{}-{}",
             session.agent, session.id
         )));
-        self.session_drag_handler(row, session, &draggable_project)
+        self.session_drag_handler(row, session, &draggable_project, cx)
             .relative()
             .when(shown_here && !is_active, |d| d.child(self.shown_mark()))
             .flex()
             .flex_col()
             .gap(px(2.))
             .py(px(7.))
-            .ml(px(SESSION_INDENT))
             .pl(px(10.))
             .pr(px(8.))
             .my(px(2.))
@@ -1898,19 +1931,34 @@ impl CrewApp {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(7.))
                     .min_w(px(0.))
                     .min_h(px(20.))
-                    .text_size(px(13.5))
+                    .text_size(px(13.))
                     .text_color(c.text)
                     .relative()
-                    .when(working, |d| {
-                        d.child(Spinner::new().color(c.accent).xsmall())
-                    })
-                    .when(running && !working, |d| {
-                        d.child(div().flex_none().size(px(7.)).rounded_full().bg(c.running))
-                    })
-                    .child(div().flex_1().min_w(px(0.)).truncate().child(title))
+                    .child(agent_icon)
+                    .child(div().flex_none().font_weight(gpui::FontWeight::SEMIBOLD).child(agent_name))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(4.))
+                            .text_size(px(12.))
+                            .text_color(if working { c.accent } else { c.muted })
+                            .map(|d| {
+                                if working {
+                                    d.child(Spinner::new().color(c.accent).xsmall()).child(t("Working…"))
+                                } else if running {
+                                    d.child(div().flex_none().size(px(7.)).rounded_full().bg(c.running)).child(t("Waiting for input"))
+                                } else {
+                                    d.child(div().flex_none().size(px(7.)).rounded_full().border_1().border_color(c.muted)).child(t("Idle"))
+                                }
+                            }),
+                    )
+                    .children(tree)
+                    .child(div().flex_1())
                     .when(session.mtime > 0., |d| {
                         d.child(
                             div()
@@ -1967,191 +2015,59 @@ impl CrewApp {
                             ),
                     ),
             )
-            .map(|d| {
-                let tree = session.worktree.as_ref().map(|w| {
-                    let archived = w.archived_id.is_some();
-                    div()
-                        .flex_none()
-                        .max_w(px(120.))
-                        .truncate()
-                        .px(px(5.))
-                        .rounded(px(4.))
-                        .bg(c.hover)
-                        .when(archived, |d| d.opacity(0.6))
-                        .child(w.name.clone())
-                });
-                if working {
-                    d.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .text_size(px(12.))
-                            .text_color(c.accent)
-                            .child(t("Working…"))
-                            .children(tree),
-                    )
-                } else if session.branch.is_some() || tree.is_some() {
-                    d.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .min_w(px(0.))
-                            .text_size(px(12.))
-                            .text_color(c.muted)
-                            .when_some(session.branch.clone(), |d, branch| {
-                                d.child(Icon::empty().path(assets::GIT_BRANCH).size(px(12.)))
-                                    .child(div().min_w(px(0.)).truncate().child(branch))
-                            })
-                            .children(tree),
-                    )
-                } else {
-                    d
-                }
-            })
+            .child(
+                div()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_size(px(13.))
+                    .text_color(c.text)
+                    .child(title),
+            )
             .into_any_element()
     }
 
-    /// Claude first, then GPT, then Antigravity, then one group per custom provider. Empty ones aren't listed.
-    fn session_groups<'a>(
-        &self,
-        sessions: &[&'a Session],
-        project_key: &str,
-    ) -> Vec<SessionGroup<'a>> {
-        let mut groups = Vec::new();
-        for (agent, label) in [("claude", "Claude"), ("codex", "GPT"), ("agy", "Antigravity")] {
-            groups.push(SessionGroup {
-                key: format!("{project_key}::{agent}"),
-                label: label.into(),
-                icon: self.agent_badge(agent, 12.),
-                agent,
-                provider: None,
-                sessions: sessions
-                    .iter()
-                    .copied()
-                    .filter(|s| s.agent == agent && s.provider.is_none())
-                    .collect(),
-            });
-        }
-        for p in &self.providers {
-            groups.push(SessionGroup {
-                key: format!("{project_key}::provider:{}", p.id),
-                label: p.name.clone(),
-                icon: self.provider_icon(p),
-                agent: p.cli(),
-                provider: Some(p.id.clone()),
-                sessions: sessions
-                    .iter()
-                    .copied()
-                    .filter(|s| s.provider.as_deref() == Some(&p.id))
-                    .collect(),
-            });
-        }
-        groups.retain(|g| !g.sessions.is_empty());
-        groups
+    /// A project's sessions in the order the user dragged them into. Ones not placed yet (new ones)
+    /// come first, newest first.
+    fn ordered_sessions<'a>(&self, sessions: Vec<&'a Session>, project_key: &str) -> Vec<&'a Session> {
+        let saved: Vec<String> = self
+            .config
+            .raw()
+            .get("sessionOrder")
+            .and_then(|o| o.get(project_key))
+            .and_then(Value::as_array)
+            .map_or(Vec::new(), |a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+        let (mut placed, mut unplaced): (Vec<&Session>, Vec<&Session>) = sessions.into_iter().partition(|s| saved.contains(&s.id));
+        placed.sort_by_key(|s| saved.iter().position(|id| *id == s.id));
+        // Sessions that haven't been written yet (mtime 0) are the newest.
+        unplaced.sort_by(|a, b| {
+            let at = |s: &Session| if s.mtime == 0. { f64::MAX } else { s.mtime };
+            at(b).total_cmp(&at(a))
+        });
+        unplaced.extend(placed);
+        unplaced
     }
 
-    fn render_group(
+    /// One project's sessions, one row each, with "show more" past [`SESSIONS_SHOWN`].
+    fn render_session_list(
         &self,
-        group: SessionGroup,
+        sessions: Vec<&Session>,
         project: &Path,
+        project_key: &str,
         searching: bool,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let c = self.colors;
-        let total = group.sessions.len();
-        let folded = !searching && self.config.is_collapsed(&group.key);
-        let hover = SharedString::from(format!("group-{}", group.key));
-        let (toggle, add_key, more_key) = (group.key.clone(), group.key.clone(), group.key.clone());
-        let group_provider = group.provider.clone();
-        let add_folder = project.to_path_buf();
-        let agent = group.agent;
-        let head = div()
-            .id(SharedString::from(format!("group-row-{}", group.key)))
-            .group(hover.clone())
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .min_h(px(28.))
-            .py(px(4.))
-            .pl(px(10.))
-            .pr(px(8.))
-            .mt(px(2.))
-            .rounded(px(8.))
-            .cursor_pointer()
-            .text_size(px(12.))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(c.muted)
-            .hover(move |s| s.bg(c.hover))
-            .on_click(cx.listener(move |app, _, _, cx| app.toggle_collapsed(&toggle, cx)))
-            .child(group.icon)
-            .child(div().flex_1().min_w(px(0.)).truncate().child(group.label))
-            .child(
-                div()
-                    .flex_none()
-                    .font_weight(gpui::FontWeight::NORMAL)
-                    .child(total.to_string()),
-            )
-            .child(
-                div()
-                    .opacity(0.)
-                    .group_hover(hover, |s| s.opacity(1.))
-                    .child(
-                        self.row_button(
-                            SharedString::from(format!("group-new-{add_key}")),
-                            IconName::Plus,
-                        )
-                        .p(px(2.))
-                        .on_click(cx.listener(
-                            move |app, _, window, cx| {
-                                cx.stop_propagation();
-                                app.start_new_with(
-                                    agent,
-                                    add_folder.clone(),
-                                    group_provider.clone(),
-                                    None,
-                                    window,
-                                    cx,
-                                );
-                            },
-                        )),
-                    ),
-            )
-            .child(
-                div().flex_none().text_color(c.muted).child(
-                    Icon::new(if folded {
-                        IconName::ChevronRight
-                    } else {
-                        IconName::ChevronDown
-                    })
-                    .size(px(13.)),
-                ),
-            )
-            .into_any_element();
-        let mut rows = vec![head];
-        if folded {
-            return rows;
-        }
-        let limit = if searching || self.show_all.contains(&group.key) {
-            usize::MAX
-        } else {
-            SESSIONS_SHOWN
-        };
-        rows.extend(
-            group
-                .sessions
-                .iter()
-                .take(limit)
-                .map(|s| self.render_session(s, project, cx)),
-        );
+        let sessions = self.ordered_sessions(sessions, project_key);
+        let total = sessions.len();
+        let more_key = project_key.to_string();
+        let limit = if searching || self.show_all.contains(&more_key) { usize::MAX } else { SESSIONS_SHOWN };
+        let mut rows: Vec<AnyElement> = sessions.iter().take(limit).map(|s| self.render_session(s, project, cx)).collect();
         if total > limit {
             let label = show_more(total - limit);
             rows.push(
                 div()
-                    .id(SharedString::from(format!("group-more-{more_key}")))
+                    .id(SharedString::from(format!("sessions-more-{more_key}")))
                     .py(px(7.))
-                    .ml(px(SESSION_INDENT))
                     .pl(px(10.))
                     .rounded(px(10.))
                     .cursor_pointer()
@@ -2167,6 +2083,20 @@ impl CrewApp {
             );
         }
         rows
+    }
+
+    /// The agent a session runs: its icon and name ("Claude", "Codex", "Antigravity", a provider's).
+    fn session_agent(&self, session: &Session) -> (AnyElement, String) {
+        if let Some(p) = session.provider.as_ref().and_then(|id| self.providers.iter().find(|p| p.id == *id)) {
+            return (self.provider_icon(p), p.name.clone());
+        }
+        let name = match session.agent.as_str() {
+            "codex" => "Codex",
+            "agy" => "Antigravity",
+            "ssh" => "SSH",
+            _ => "Claude",
+        };
+        (self.agent_badge(&session.agent, 15.), name.to_string())
     }
 
     /// A folding section under the projects: Hosts or Agents.
@@ -2231,6 +2161,7 @@ impl CrewApp {
                         used: 0.,
                         resets_at: None,
                         minutes: w.minutes,
+                        label: w.label.clone(),
                     }
                 } else {
                     w.clone()
@@ -2264,6 +2195,7 @@ impl CrewApp {
             })
             .when(now - plan.at > 6 * 3_600_000, |d| d.opacity(0.6))
             .child(self.agent_badge(agent, 13.))
+            .when_some(first.label.clone(), |d, group| d.child(group))
             .child(
                 div()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -2274,7 +2206,7 @@ impl CrewApp {
             .when_some(wins.get(1), |d, second| {
                 d.child(div().opacity(0.8).child(format!(
                     "· {} {}%",
-                    window_name(second.minutes),
+                    second.label.clone().unwrap_or_else(|| window_name(second.minutes)),
                     second.used.round() as i64
                 )))
             })
@@ -2283,7 +2215,7 @@ impl CrewApp {
 
     fn render_status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let c = self.colors;
-        let plans: Vec<AnyElement> = [("claude", &self.plan_claude), ("codex", &self.plan_codex)]
+        let plans: Vec<AnyElement> = [("claude", &self.plan_claude), ("codex", &self.plan_codex), ("agy", &self.plan_agy)]
             .into_iter()
             .filter_map(|(agent, plan)| {
                 plan.as_ref()
@@ -2463,8 +2395,23 @@ impl CrewApp {
                         div()
                             .flex_1()
                             .min_w(px(0.))
-                            .truncate()
-                            .child(project.name.clone()),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().min_w(px(0.)).truncate().child(project.name.clone()))
+                            .when_some(project.branch.clone(), |d, branch| {
+                                d.child(
+                                    div()
+                                        .flex()
+                                        .min_w(px(0.))
+                                        .items_center()
+                                        .gap(px(4.))
+                                        .text_size(px(12.))
+                                        .text_color(c.muted)
+                                        .child(Icon::empty().path(assets::GIT_BRANCH).size(px(12.)))
+                                        .child(div().min_w(px(0.)).truncate().child(branch)),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -2525,9 +2472,7 @@ impl CrewApp {
                             .mb(px(6.))
                             .border_l_1()
                             .border_color(c.border)
-                            .children(self.session_groups(&sessions, &key).into_iter().flat_map(
-                                |g| self.render_group(g, &project.path, !query.is_empty(), cx),
-                            )),
+                            .children(self.render_session_list(sessions, &project.path, &key, !query.is_empty(), cx)),
                     )
                 })
                 .into_any_element(),

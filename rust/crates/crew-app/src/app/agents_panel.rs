@@ -45,6 +45,9 @@ pub(super) struct AgentEditor {
     /// Codex's models for this account: None while loading or when it can't say.
     codex_models: Option<Vec<CodexModel>>,
     codex_loading: bool,
+    /// Antigravity's models, the effort part of each: None while loading or when it can't say.
+    agy_models: Option<Vec<(String, String)>>,
+    agy_loading: bool,
     error: Option<String>,
 }
 
@@ -78,7 +81,11 @@ fn access_label(a: &str) -> &'static str {
 }
 
 fn install_command(cli: &str) -> &'static str {
-    if cli == "codex" { "npm install -g @openai/codex" } else { "irm https://claude.ai/install.ps1 | iex" }
+    match cli {
+        "codex" => "npm install -g @openai/codex",
+        "agy" => "https://antigravity.google/docs",
+        _ => "irm https://claude.ai/install.ps1 | iex",
+    }
 }
 
 fn elapsed_text(r: &PublicRun) -> String {
@@ -193,7 +200,7 @@ impl CrewApp {
                 .default_value(text)
         });
         name.update(cx, |s, cx| s.focus(window, cx));
-        let known_cli = a.cli == "claude" || a.cli == "codex" || self.editor_provider(&a.cli).is_some();
+        let known_cli = ["claude", "codex", "agy"].contains(&a.cli.as_str()) || self.editor_provider(&a.cli).is_some();
         self.agent_editor = Some(AgentEditor {
             id: (!is_new).then(|| a.id.clone()),
             title: match (is_new, zh()) {
@@ -211,10 +218,12 @@ impl CrewApp {
             installed: HashMap::new(),
             codex_models: None,
             codex_loading: false,
+            agy_models: None,
+            agy_loading: false,
             error: None,
         });
         // Which CLIs are installed: one that isn't says so, with how to install it.
-        let check = cx.background_spawn(async move { ["claude", "codex"].map(|c| (c.to_string(), crew_env::command_exists(c))) });
+        let check = cx.background_spawn(async move { ["claude", "codex", "agy"].map(|c| (c.to_string(), crew_env::command_exists(c))) });
         cx.spawn(async move |this, cx| {
             let results = check.await;
             let _ = this.update(cx, |app, cx| {
@@ -226,7 +235,29 @@ impl CrewApp {
         })
         .detach();
         self.load_codex_models(cx);
+        self.load_agy_models(cx);
         cx.notify();
+    }
+
+    fn load_agy_models(&mut self, cx: &mut Context<Self>) {
+        let Some(e) = self.agent_editor.as_mut() else { return };
+        if e.cli != "agy" || e.agy_models.is_some() || e.agy_loading {
+            return;
+        }
+        e.agy_loading = true;
+        let command = self.config.str("agyCommand").to_string();
+        let load = cx.background_spawn(async move { crew_core::agy::model_ids(&command) });
+        cx.spawn(async move |this, cx| {
+            let list = load.await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(e) = app.agent_editor.as_mut() {
+                    e.agy_models = list;
+                    e.agy_loading = false;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn load_codex_models(&mut self, cx: &mut Context<Self>) {
@@ -261,6 +292,10 @@ impl CrewApp {
             let m = list.iter().find(|m| m.value == e.model).or_else(|| list.iter().find(|m| m.is_default));
             return m.filter(|m| !m.efforts.is_empty()).map_or_else(|| OTHER_EFFORTS.map(String::from).to_vec(), |m| m.efforts.clone());
         }
+        if e.cli == "agy" {
+            // Antigravity's models come with their effort: "Gemini 3.8 Flash (High)".
+            return Vec::new();
+        }
         CLAUDE_EFFORTS.map(String::from).to_vec()
     }
 
@@ -284,6 +319,12 @@ impl CrewApp {
             default_label = format!("{} ({})", t("Default"), if current.is_empty() { t("none set") } else { current });
             if list.is_empty() {
                 hint = Some(t("Add models to this provider in Settings → Model providers.").to_string());
+            }
+        } else if e.cli == "agy" {
+            list = e.agy_models.clone().unwrap_or_default();
+            default_label = if e.agy_loading { t("Loading models…") } else { t("Default (your Antigravity model)") }.to_string();
+            if !e.agy_loading && e.agy_models.is_none() && e.installed.get("agy") != Some(&false) {
+                hint = Some(t("Couldn't load Antigravity's models; it uses its default.").to_string());
             }
         } else if e.cli == "claude" {
             list = CLAUDE_MODELS.iter().map(|(v, l)| (v.to_string(), l.to_string())).collect();
@@ -341,10 +382,14 @@ impl CrewApp {
 
         let not_installed = provider.is_none() && e.installed.get(&e.cli) == Some(&false);
         let cli_label = |cli: &str, installed: &HashMap<String, bool>| {
-            let name = if cli == "codex" { "Codex" } else { "Claude Code" };
+            let name = match cli {
+                "codex" => "Codex",
+                "agy" => "Antigravity",
+                _ => "Claude Code",
+            };
             if installed.get(cli) == Some(&false) { format!("{name} ({})", t("not installed")) } else { name.to_string() }
         };
-        let mut cli_entries: Vec<MenuEntry> = ["claude", "codex"]
+        let mut cli_entries: Vec<MenuEntry> = ["claude", "codex", "agy"]
             .into_iter()
             .map(|cli| {
                 entry(cli_label(cli, &e.installed), move |app, _, cx| {
@@ -354,6 +399,7 @@ impl CrewApp {
                     }
                     app.fit_effort();
                     app.load_codex_models(cx);
+                    app.load_agy_models(cx);
                 })
             })
             .collect();
@@ -402,7 +448,7 @@ impl CrewApp {
             })
         }));
 
-        let effort_default = if provider.is_some() {
+        let effort_default = if provider.is_some() || e.cli == "agy" {
             t("Default (the model's)").to_string()
         } else if e.cli == "codex" {
             let list = e.codex_models.as_deref().unwrap_or(&[]);
@@ -439,6 +485,8 @@ impl CrewApp {
         let warning = match e.access.as_str() {
             "full" => t("It runs any command and changes anything without asking you, including outside the project. Give this only to agents you trust with that, like a publisher."),
             "edit" if on_codex => t("Codex's sandbox keeps it to the project folder."),
+            "edit" if e.cli == "agy" && provider.is_none() => t("Antigravity's accept-edits mode lets it change files; commands that need permission are refused."),
+            _ if e.cli == "agy" && provider.is_none() => t("Antigravity's plan mode: it researches and plans, and changes nothing."),
             "edit" => t("Claude's auto mode lets it act, and blocks risky actions."),
             _ => t("It can look but not change anything."),
         };
@@ -624,7 +672,7 @@ impl CrewApp {
         let Some(id) = r.session_id.clone() else { return };
         let session = Session {
             id,
-            agent: "claude".into(),
+            agent: if r.cli == "agy" { "agy" } else { "claude" }.into(),
             file: PathBuf::new(),
             cwd: Some(PathBuf::from(&r.cwd)),
             branch: None,
@@ -656,7 +704,8 @@ impl CrewApp {
             let id = SharedString::from(r.id.clone());
             let (dismiss_id, stop_id, shown) = (r.id.clone(), r.id.clone(), r.clone());
             let open_run = r.clone();
-            let can_open = r.cli == "claude" && r.session_id.is_some() && !running;
+            // Claude's and Antigravity's runs leave a conversation to resume.
+            let can_open = (r.cli == "claude" || r.cli == "agy") && r.session_id.is_some() && !running;
             div()
                 .flex()
                 .flex_col()

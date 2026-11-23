@@ -285,7 +285,7 @@ impl CrewApp {
         .detach();
     }
 
-    /// A host's agent sessions: Claude, Codex, or a custom provider, which gets the host's
+    /// A host's agent sessions: Claude, Codex, Antigravity, or a custom provider, which gets the host's
     /// instructions from the workspace like the others.
     fn host_agent_entries(&self, id: &str, name: Option<&str>) -> Vec<MenuEntry> {
         let label = |who: &str| match (name, zh()) {
@@ -294,7 +294,7 @@ impl CrewApp {
             (None, true) => format!("新建 {who} 会话"),
             (None, false) => format!("New {who} session"),
         };
-        let mut items: Vec<MenuEntry> = [("claude", "Claude"), ("codex", "Codex")]
+        let mut items: Vec<MenuEntry> = [("claude", "Claude"), ("codex", "Codex"), ("agy", "Antigravity")]
             .into_iter()
             .map(|(agent, who)| {
                 let id = id.to_string();
@@ -315,6 +315,7 @@ impl CrewApp {
             match o.agent.as_str() {
                 "claude" => "Claude",
                 "codex" => "Codex",
+                "agy" => "Antigravity",
                 "install" => "Installer",
                 _ => "SSH",
             },
@@ -327,7 +328,7 @@ impl CrewApp {
         format!("{who} · {place}")
     }
 
-    /// A session row's icon: its provider's, else Claude's or Codex's.
+    /// A session row's icon: its provider's, else its agent's.
     pub(super) fn session_badge(&self, provider: Option<&str>, agent: &str, size: f32) -> AnyElement {
         match provider.and_then(|id| self.providers.iter().find(|p| p.id == id)) {
             Some(p) => self.provider_icon(p),
@@ -1176,6 +1177,7 @@ impl CrewApp {
             let who = match agent.as_str() {
                 "claude" => "Claude",
                 "codex" => "Codex",
+                "agy" => "Antigravity",
                 _ => t("An agent"),
             };
             let title = self.open.iter().find(|o| &o.id == session).and_then(|o| o.title.clone());

@@ -190,7 +190,7 @@ impl CrewApp {
             div()
                 .my(px(2.))
                 .py(px(4.))
-                .pl(px(SESSION_INDENT + 6.))
+                .pl(px(6.))
                 .pr(px(6.))
                 .on_mouse_down(MouseButton::Left, |_: &MouseDownEvent, _, cx| cx.stop_propagation())
                 .child(Input::new(&r.input).small())

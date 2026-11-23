@@ -1396,6 +1396,7 @@ impl CrewApp {
         match cli.strip_prefix("provider:") {
             Some(id) => self.providers.iter().find(|p| p.id == id).map_or_else(|| id.to_string(), |p| p.name.clone()),
             None if cli == "codex" => "Codex".to_string(),
+            None if cli == "agy" => "Antigravity".to_string(),
             None => "Claude".to_string(),
         }
     }

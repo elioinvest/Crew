@@ -500,3 +500,47 @@ fn agents_run_through_the_crew_command() {
     assert!(err(&wrong).contains("Unknown run id"));
     let _ = saved;
 }
+
+#[test]
+fn antigravity_agents_take_the_task_on_stdin_and_answer_in_its_events() {
+    let w = World::new();
+    // Stands in for agy's stream-JSON mode: keeps what it was given, then answers a step at a time.
+    let fake = w.dir.join("fake-agy.cmd");
+    std::fs::write(
+        &fake,
+        "@echo off\r\necho %* > \"%~dp0agy-args.txt\"\r\nmore > \"%~dp0agy-input.txt\"\r\n\
+         echo {\"event\":\"init\",\"init\":{\"cwd\":\"x\"}}\r\n\
+         echo {\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-9\",\"step_index\":1,\"state\":\"ACTIVE\",\"step_type\":\"agent_response\",\"text_delta\":\"the \"}}\r\n\
+         echo {\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-9\",\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"text_delta\":\"answer\"}}\r\n\
+         echo {\"event\":\"result\",\"result\":{\"conversation_id\":\"conv-9\",\"status\":\"SUCCESS\",\"response\":\"the answer\"}}\r\n",
+    )
+    .unwrap();
+    let failing = w.dir.join("failing-agy.cmd");
+    std::fs::write(&failing, "@echo off\r\nmore >nul\r\necho {\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"response\":\"\",\"error\":\"weekly limit reached\"}}\r\nexit /b 1\r\n").unwrap();
+    let set_command = |path: &PathBuf| {
+        std::fs::write(w.dir.join("config.json"), serde_json::json!({"agyCommand": path.to_string_lossy()}).to_string()).unwrap();
+    };
+    set_command(&fake);
+    roster::save(&w.paths, RosterAgent { name: "Planner".into(), cli: "agy".into(), access: "read".into(), model: "gemini-3.8-flash-high".into(), instructions: "Plan it.".into(), ..RosterAgent::default() }, |_| false).unwrap();
+    assert!(out(&w.cli("crew", &["agents"])).contains("Planner\tagy"), "an Antigravity agent stays one");
+
+    let done = w.cli("crew", &["ask", "Planner", "plan the release"]);
+    assert_eq!(done.status.code(), Some(0), "{} {}", out(&done), err(&done));
+    assert!(out(&done).contains("=== Planner (r1) · done") && out(&done).contains("the answer"), "{}", out(&done));
+    let run = &w.service.list_runs()[0];
+    assert_eq!(run.session_id.as_deref(), Some("conv-9"), "its conversation, to resume");
+
+    let args = std::fs::read_to_string(w.dir.join("agy-args.txt")).unwrap();
+    for want in ["--input-format stream-json", "--output-format stream-json", "--mode plan", "--model gemini-3.8-flash-high"] {
+        assert!(args.contains(want), "{want} in {args}");
+    }
+    let input: serde_json::Value = serde_json::from_str(std::fs::read_to_string(w.dir.join("agy-input.txt")).unwrap().trim()).unwrap();
+    assert_eq!(input["event"], "user");
+    let text = input["message"]["content"].as_str().unwrap();
+    assert!(text.contains("Plan it.") && text.contains("plan the release"), "{text}");
+
+    set_command(&failing);
+    let failed = w.cli("crew", &["ask", "Planner", "x"]);
+    assert_eq!(failed.status.code(), Some(1));
+    assert!(out(&failed).contains("weekly limit reached"), "{}", out(&failed));
+}

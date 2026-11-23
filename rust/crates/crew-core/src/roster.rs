@@ -11,7 +11,7 @@ use crate::config::Paths;
 pub struct RosterAgent {
     pub id: String,
     pub name: String,
-    /// "claude", "codex" or "provider:<id>".
+    /// "claude", "codex", "agy" or "provider:<id>".
     pub cli: String,
     pub model: String,
     pub effort: String,
@@ -62,6 +62,7 @@ pub fn save(paths: &Paths, mut input: RosterAgent, known_provider: impl Fn(&str)
     }
     input.cli = match input.cli.as_str() {
         "codex" => "codex".into(),
+        "agy" => "agy".into(),
         c if c.strip_prefix("provider:").is_some_and(&known_provider) => c.into(),
         _ => "claude".into(),
     };

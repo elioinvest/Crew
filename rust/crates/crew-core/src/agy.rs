@@ -100,6 +100,21 @@ fn group_models(text: &str) -> Vec<AgyModel> {
 
 /// agy's models, from `agy models`; it asks Antigravity's servers, so it takes a moment.
 pub fn models(command: &str) -> Option<Vec<AgyModel>> {
+    let list = group_models(&models_text(command)?);
+    (!list.is_empty()).then_some(list)
+}
+
+/// Every model `agy --model` takes, each effort its own: ("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)").
+pub fn model_ids(command: &str) -> Option<Vec<(String, String)>> {
+    let list: Vec<(String, String)> = models_text(command)?
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(id, label)| (id.trim().to_string(), label.trim().to_string()))
+        .collect();
+    (!list.is_empty()).then_some(list)
+}
+
+fn models_text(command: &str) -> Option<String> {
     use std::os::windows::process::CommandExt;
     let command = if command.is_empty() { "agy" } else { command };
     let launch = crate::agents::shell_command(&[command.to_string(), "models".to_string()]);
@@ -113,8 +128,7 @@ pub fn models(command: &str) -> Option<Vec<AgyModel>> {
         .stdin(std::process::Stdio::null())
         .output()
         .ok()?;
-    let list = group_models(&String::from_utf8_lossy(&out.stdout));
-    (!list.is_empty()).then_some(list)
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The conversations to list: the top-level ones that were started from a folder and have had a

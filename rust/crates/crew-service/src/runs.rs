@@ -44,6 +44,8 @@ struct RunState {
     public: PublicRun,
     engine: String,
     last_text: String,
+    /// Antigravity streams its reply in pieces, a step at a time: the step being written.
+    agy_step: Option<i64>,
     pid: Option<u32>,
 }
 
@@ -123,6 +125,29 @@ pub(crate) fn codex_args(a: &RosterAgent, cwd: &str) -> Vec<String> {
     args
 }
 
+/// Antigravity reads the task as stream-JSON on stdin and reports in stream-JSON. Headless, it can't
+/// ask for permission, so the access level picks its mode: plan only, edits allowed, or everything.
+pub(crate) fn agy_args(a: &RosterAgent) -> Vec<String> {
+    let mut args: Vec<String> = ["--input-format", "stream-json", "--output-format", "stream-json"].map(String::from).to_vec();
+    match a.access.as_str() {
+        "full" => args.push("--dangerously-skip-permissions".into()),
+        "edit" => args.extend(["--mode".to_string(), "accept-edits".to_string()]),
+        _ => args.extend(["--mode".to_string(), "plan".to_string()]),
+    }
+    if !a.model.is_empty() {
+        args.extend(["--model".to_string(), a.model.clone()]);
+    }
+    if !a.effort.is_empty() {
+        args.extend(["--effort".to_string(), a.effort.clone()]);
+    }
+    args
+}
+
+/// The task as Antigravity's stream input takes it: one user message per line.
+pub(crate) fn agy_input(text: &str) -> String {
+    format!("{}\n", serde_json::json!({ "event": "user", "message": { "role": "user", "content": text } }))
+}
+
 fn elapsed(r: &PublicRun) -> String {
     let end = if r.ended_at > 0 { r.ended_at } else { now() };
     let s = ((end - r.started_at).max(0) as f64 / 1000.).round() as i64;
@@ -177,7 +202,51 @@ impl Service {
         let text = |k: &str| e.get(k).and_then(Value::as_str).map(str::to_string);
         let mut activity = None;
         let engine = run.state.lock().unwrap().engine.clone();
-        if engine == "claude" {
+        if engine == "agy" {
+            // {"event":"step_update","step_update":{…}}, then {"event":"result","result":{…}}.
+            let event = e.get("event").and_then(Value::as_str).unwrap_or("");
+            let Some(body) = e.get(event) else { return };
+            let field = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("");
+            if !field("conversation_id").is_empty() {
+                run.state.lock().unwrap().public.session_id = Some(field("conversation_id").to_string());
+            }
+            if event == "step_update" {
+                let step = body.get("step_index").and_then(Value::as_i64);
+                match field("step_type") {
+                    "agent_response" => {
+                        let mut s = run.state.lock().unwrap();
+                        if s.agy_step != step {
+                            s.agy_step = step;
+                            s.last_text.clear();
+                        }
+                        s.last_text.push_str(field("text_delta"));
+                        let text = s.last_text.trim().to_string();
+                        drop(s);
+                        if !text.is_empty() {
+                            activity = Some(short(&text, 90));
+                        }
+                    }
+                    "user_input" | "" => {}
+                    other => {
+                        // A tool step: "run_command" is "Run command".
+                        let words = other.replace('_', " ");
+                        let mut c = words.chars();
+                        activity = c.next().map(|f| f.to_uppercase().chain(c).collect());
+                    }
+                }
+            }
+            if event == "result" {
+                let response = field("response").trim().to_string();
+                if field("status") == "SUCCESS" {
+                    let last = run.state.lock().unwrap().last_text.trim().to_string();
+                    self.finish_run(run, "done", Some(if response.is_empty() { last } else { response }), None);
+                } else {
+                    let why = Some(field("error")).filter(|e| !e.is_empty()).map_or_else(|| "Antigravity stopped with an error".to_string(), str::to_string);
+                    self.finish_run(run, "failed", Some(response), Some(short(&why, 300)));
+                }
+                return;
+            }
+        } else if engine == "claude" {
             if kind == "system" {
                 if let Some(id) = text("session_id") {
                     run.state.lock().unwrap().public.session_id = Some(id);
@@ -268,6 +337,7 @@ impl Service {
                 public: PublicRun { id: id.clone(), agent: agent.name.clone(), cli: agent.cli.clone(), task: task.to_string(), cwd: cwd.to_string(), caller: caller.to_string(), status: "running".into(), activity: "Starting…".into(), started_at: now(), ended_at: 0, result: String::new(), error: String::new(), session_id: None },
                 engine: agent.cli.clone(),
                 last_text: String::new(),
+                agy_step: None,
                 pid: None,
             }),
             done,
@@ -301,7 +371,18 @@ impl Service {
             if c.is_empty() { default.to_string() } else { c.to_string() }
         };
         let mut prompt_file = None;
-        let (argv, input) = if engine == "codex" {
+        let (argv, input) = if engine == "agy" {
+            let mut argv = vec![command("agyCommand", "agy")];
+            argv.extend(pre);
+            argv.extend(agy_args(&opts));
+            let instructions = agent.instructions.trim();
+            let text = if instructions.is_empty() {
+                task.to_string()
+            } else {
+                format!("You are {}, an agent another agent handed a task to through Crew. Do the task, then end with your answer: it's returned to them as is.\n\n{instructions}\n\n---\n\nYour task:\n{task}", agent.name)
+            };
+            (argv, agy_input(&text))
+        } else if engine == "codex" {
             install::write_codex_rules(&paths, true); // lets crew-ssh and crew out of Codex's sandbox
             let mut argv = vec![command("codexCommand", "codex")];
             argv.extend(pre);

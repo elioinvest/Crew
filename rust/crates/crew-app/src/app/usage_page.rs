@@ -216,6 +216,7 @@ impl CrewApp {
         match id {
             "claude" => "Claude Code".into(),
             "codex" => "Codex".into(),
+            "agy" => "Antigravity".into(),
             other => self.providers.iter().find(|p| p.id == other).map_or_else(|| other.to_string(), |p| p.name.clone()),
         }
     }
@@ -224,6 +225,7 @@ impl CrewApp {
         match id {
             "claude" => self.colors.accent,
             "codex" => self.colors.text,
+            "agy" => hsla(217. / 360., 0.9, 0.6, 1.),
             other => {
                 let h = other.chars().fold(0u32, |h, c| (h * 31 + c as u32) % 360);
                 hsla(h as f32 / 360., 0.55, 0.48, 1.)
@@ -233,7 +235,7 @@ impl CrewApp {
 
     fn provider_mark(&self, id: &str) -> AnyElement {
         match id {
-            "claude" | "codex" => self.agent_badge(id, 14.),
+            "claude" | "codex" | "agy" => self.agent_badge(id, 14.),
             other => self.providers.iter().find(|p| p.id == other).map_or_else(|| div().size(px(16.)).into_any_element(), |p| self.provider_icon(p)),
         }
     }
@@ -569,7 +571,7 @@ impl CrewApp {
             let text = if mins >= 1440 { format!("{}d {}h", mins / 1440, mins % 1440 / 60) } else if mins >= 60 { format!("{}h {}m", mins / 60, mins % 60) } else { format!("{mins}m") };
             format!("{} {text}", t("Resets in"))
         };
-        let groups: Vec<AnyElement> = [("claude", &self.plan_claude), ("codex", &self.plan_codex)]
+        let groups: Vec<AnyElement> = [("claude", &self.plan_claude), ("codex", &self.plan_codex), ("agy", &self.plan_agy)]
             .into_iter()
             .filter_map(|(agent, plan)| plan.as_ref().filter(|p| !p.windows.is_empty()).map(|p| (agent, p)))
             .map(|(agent, plan)| {
@@ -598,7 +600,10 @@ impl CrewApp {
                                     .flex()
                                     .justify_between()
                                     .text_size(px(13.))
-                                    .child(window_name(w.minutes))
+                                    .child(match &w.label {
+                                        Some(group) => format!("{group} · {}", window_name(w.minutes)),
+                                        None => window_name(w.minutes),
+                                    })
                                     .child(div().flex().gap(px(6.)).child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(format!("{pct}%"))).child(div().text_color(c.muted).child(reset_text(w.resets_at)))),
                             )
                             .child(div().h(px(8.)).rounded_full().bg(c.hover).overflow_hidden().child(div().h_full().w(relative(pct as f32 / 100.)).bg(color)))

@@ -36,6 +36,8 @@ pub struct Project {
     pub sessions: Vec<Session>,
     pub mtime: f64,
     pub exists: bool,
+    /// The branch its folder has checked out, when it's a Git repository.
+    pub branch: Option<String>,
 }
 
 const HEAD: u64 = 128 * 1024;
@@ -395,6 +397,20 @@ pub struct ProviderHome {
     pub home: PathBuf,
 }
 
+/// The branch a folder has checked out, from .git/HEAD (or a linked worktree's), without running Git.
+pub fn head_branch(dir: &Path) -> Option<String> {
+    let git = dir.join(".git");
+    let head = if git.is_dir() {
+        git.join("HEAD")
+    } else {
+        let link = std::fs::read_to_string(&git).ok()?;
+        let target = PathBuf::from(link.trim().strip_prefix("gitdir:")?.trim());
+        (if target.is_absolute() { target } else { dir.join(target) }).join("HEAD")
+    };
+    let text = std::fs::read_to_string(head).ok()?;
+    text.trim().strip_prefix("ref: refs/heads/").map(String::from)
+}
+
 /// Every project with its sessions, in the order the user set. May add newly found projects to the
 /// order in `config`; the bool says whether it changed and should be saved.
 pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHome]) -> (Vec<Project>, bool) {
@@ -436,6 +452,7 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
                 sessions: Vec::new(),
                 mtime: 0.0,
                 exists: false,
+                branch: None,
             });
             proj.sessions.extend(sessions.into_iter().filter(|s| s.title.is_some())); // no prompt yet
         }
@@ -462,6 +479,7 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
                 sessions: Vec::new(),
                 mtime: 0.0,
                 exists: false,
+                branch: None,
             });
             proj.sessions.push(s);
         }
@@ -475,6 +493,7 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
             sessions: Vec::new(),
             mtime: 0.0,
             exists: false,
+            branch: None,
         });
         proj.sessions.push(s);
     }
@@ -499,6 +518,7 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
             sessions: Vec::new(),
             mtime: 0.0,
             exists: false,
+            branch: None,
         });
         main.sessions.extend(moved.sessions.into_iter().map(|mut s| {
             s.worktree = Some(wt.clone());
@@ -514,6 +534,7 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
             sessions: Vec::new(),
             mtime: 0.0,
             exists: false,
+            branch: None,
         });
     }
 
@@ -524,6 +545,7 @@ pub fn scan_projects(paths: &Paths, config: &mut Config, providers: &[ProviderHo
         p.sessions.sort_by(|a, b| b.mtime.total_cmp(&a.mtime));
         p.mtime = p.sessions.first().map_or(0.0, |s| s.mtime);
         p.exists = p.path.exists();
+        p.branch = head_branch(&p.path);
     }
     // Projects keep the order the user set. Ones not placed yet go at the end, newest first, and
     // from then on stay where they are.

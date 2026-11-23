@@ -1,5 +1,5 @@
-//! Dragging in the sidebar: a project above or below another to order them, a session onto a pane to
-//! show it there.
+//! Dragging in the sidebar: a project above or below another to order them, a session above or below
+//! another in its project to order them, or onto a pane to show it there.
 
 use gpui::{Div, DragMoveEvent, Stateful};
 
@@ -96,13 +96,71 @@ impl CrewApp {
         self.rescan(cx);
     }
 
-    /// Lets a session row be dragged onto a pane.
-    pub(super) fn session_drag_handler(&self, row: Stateful<Div>, session: &Session, project: &Path) -> Stateful<Div> {
+    /// Lets a session row be dragged onto a pane, or above or below another session of its project.
+    pub(super) fn session_drag_handler(&self, row: Stateful<Div>, session: &Session, project: &Path, cx: &mut Context<Self>) -> Stateful<Div> {
         let dragged = DraggedSession { session: session.clone(), project: project.to_path_buf(), colors: self.colors };
+        let (over, onto, folder) = (session.id.clone(), session.id.clone(), project.to_path_buf());
+        let drop_folder = folder.clone();
+        let accent = self.colors.accent;
+        let line = self.session_drop.as_ref().filter(|(id, _)| *id == session.id).map(|(_, after)| *after);
         row.on_drag(dragged, |d: &DraggedSession, _, _, cx| {
             let (text, colors) = (d.session.title.clone().unwrap_or_else(|| t("New session").to_string()), d.colors);
             cx.new(|_| DragLabel { text, colors })
         })
+        .on_drag_move::<DraggedSession>(cx.listener(move |app, e: &DragMoveEvent<DraggedSession>, _, cx| {
+            let position = e.event.position;
+            // Only among its own project's sessions.
+            let here = (e.bounds.contains(&position) && same_folder(&e.drag(cx).project, &folder) && e.drag(cx).session.id != over)
+                .then(|| position.y > e.bounds.origin.y + e.bounds.size.height / 2.);
+            match here {
+                Some(after) => {
+                    if app.session_drop.as_ref() != Some(&(over.clone(), after)) {
+                        app.session_drop = Some((over.clone(), after));
+                        cx.notify();
+                    }
+                }
+                None => {
+                    if app.session_drop.as_ref().is_some_and(|(id, _)| *id == over) {
+                        app.session_drop = None;
+                        cx.notify();
+                    }
+                }
+            }
+        }))
+        .on_drop::<DraggedSession>(cx.listener(move |app, d: &DraggedSession, _, cx| {
+            let Some((_, after)) = app.session_drop.take() else { return };
+            if same_folder(&d.project, &drop_folder) {
+                cx.stop_propagation();
+                app.move_session(&drop_folder, &d.session.id, &onto, after, cx);
+            }
+        }))
+        .when_some(line, |d, after| {
+            d.child(div().absolute().left(px(0.)).right(px(0.)).h(px(2.)).bg(accent).map(|l| if after { l.bottom(px(0.)) } else { l.top(px(0.)) }))
+        })
+    }
+
+    /// Moves session `from` next to session `to` in a project (after it, or before it), and saves the
+    /// project's order. Every session listed is placed, so ones made later go on top.
+    fn move_session(&mut self, folder: &Path, from: &str, to: &str, after: bool, cx: &mut Context<Self>) {
+        let key = folder.to_string_lossy().to_string();
+        let Some(project) = self.projects.iter().find(|p| same_folder(&p.path, folder)) else { return };
+        let mut ids: Vec<String> = self.ordered_sessions(project.sessions.iter().collect(), &key).iter().map(|s| s.id.clone()).collect();
+        // A new session with no file yet has a row too.
+        for o in self.open.iter().filter(|o| !o.on_disk && same_folder(o.worktree.as_ref().map_or(&o.cwd, |w| &w.main), folder)) {
+            if !ids.contains(&o.id) {
+                ids.insert(0, o.id.clone());
+            }
+        }
+        ids.retain(|id| id != from);
+        let Some(i) = ids.iter().position(|id| id == to) else {
+            cx.notify();
+            return;
+        };
+        ids.insert(if after { i + 1 } else { i }, from.to_string());
+        let mut all = self.config.raw().get("sessionOrder").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}));
+        all[key] = json!(ids);
+        self.save_setting("sessionOrder", all);
+        cx.notify();
     }
 
     /// Lets a pane take a dragged session.
@@ -114,6 +172,7 @@ impl CrewApp {
 
     /// Dropping a session that's in another pane swaps the two panes' sessions.
     fn open_in_pane(&mut self, leaf: u64, d: &DraggedSession, window: &mut Window, cx: &mut Context<Self>) {
+        self.session_drop = None;
         let previous = self.layout.focused_session();
         let open = self.open.iter().find(|o| o.id == d.session.id && o.agent == d.session.agent).map(|o| o.key);
         match open {

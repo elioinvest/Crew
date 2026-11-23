@@ -28,6 +28,8 @@ pub struct PlanWindow {
     /// Epoch milliseconds.
     pub resets_at: Option<i64>,
     pub minutes: i64,
+    /// What the limit covers, when a plan has more than one of the same length (Antigravity's model groups).
+    pub label: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -56,7 +58,7 @@ pub fn claude_from_hook(paths: &Paths) -> Option<PlanUsage> {
     let limits = j.get("rate_limits")?;
     let window = |w: Option<&Value>, minutes| {
         let w = w?;
-        Some(PlanWindow { used: w.get("used_percentage")?.as_f64()?, resets_at: w.get("resets_at").and_then(Value::as_f64).map(|s| (s * 1000.) as i64), minutes })
+        Some(PlanWindow { used: w.get("used_percentage")?.as_f64()?, resets_at: w.get("resets_at").and_then(Value::as_f64).map(|s| (s * 1000.) as i64), minutes, label: None })
     };
     let windows: Vec<_> = [window(limits.get("five_hour"), 300), window(limits.get("seven_day"), 10080)].into_iter().flatten().collect();
     (!windows.is_empty()).then(|| PlanUsage { at: j.get("at").and_then(Value::as_i64).unwrap_or(0), plan: None, windows })
@@ -78,6 +80,7 @@ fn codex_window(w: Option<&Value>, used: &str, resets: &str, minutes: &str) -> O
         used: w.get(used)?.as_f64()?,
         resets_at: w.get(resets).and_then(Value::as_f64).map(|s| (s * 1000.) as i64),
         minutes: w.get(minutes).and_then(Value::as_i64).unwrap_or(0),
+        label: None,
     })
 }
 
@@ -205,12 +208,108 @@ pub fn parse_claude_usage_screen(text: &str) -> Option<PlanUsage> {
     let now = Local::now();
     let bar = |r: &Regex, minutes| {
         let m = r.captures(text)?;
-        Some(PlanWindow { used: m[1].parse().ok()?, resets_at: parse_reset_time(&m[2], now), minutes })
+        Some(PlanWindow { used: m[1].parse().ok()?, resets_at: parse_reset_time(&m[2], now), minutes, label: None })
     };
     let windows: Vec<_> = [bar(&SESSION, 300), bar(&WEEK_ALL, 10080).or_else(|| bar(&WEEK, 10080))].into_iter().flatten().collect();
     static PLAN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Claude (Pro|Max|Team|Enterprise)\b").unwrap());
     let plan = PLAN.captures(text).map(|m| m[1].to_string());
     (!windows.is_empty()).then(|| PlanUsage { at: now_ms(), plan, windows })
+}
+
+/// Antigravity's /usage: a weekly limit per model group, given as what's left.
+///
+/// ```text
+/// GEMINI MODELS
+///   Weekly Limit Remaining
+///     [██████████] 99.72%
+///     Refreshes in 152h 43m
+/// CLAUDE AND GPT MODELS
+///   Weekly Limit Remaining
+///     [██████████] 100.00%
+///     Quota available
+/// ```
+pub fn parse_agy_usage_screen(text: &str) -> Option<PlanUsage> {
+    static GROUP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([A-Z][A-Z0-9 .&-]*?) MODELS\s*$").unwrap());
+    static LIMIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\s*(weekly|daily|5-hour|hourly) limit remaining").unwrap());
+    static PERCENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)%\s*$").unwrap());
+    static REFRESH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)refreshes in\s+(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?").unwrap());
+    static PLAN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(Antigravity ([^()]+?) Quota\)").unwrap());
+    let now = now_ms();
+    let mut group: Option<String> = None;
+    let mut windows: Vec<PlanWindow> = Vec::new();
+    let mut open: Option<usize> = None; // the window whose percent and refresh come next
+    for line in text.lines() {
+        if let Some(m) = GROUP.captures(line) {
+            group = Some(group_name(&m[1]));
+            open = None;
+        } else if let Some(m) = LIMIT.captures(line) {
+            let minutes = match m[1].to_lowercase().as_str() {
+                "weekly" => 10080,
+                "daily" => 1440,
+                "5-hour" => 300,
+                _ => 60,
+            };
+            windows.push(PlanWindow { used: 0., resets_at: None, minutes, label: group.clone() });
+            open = Some(windows.len() - 1);
+        } else if let (Some(i), Some(m)) = (open, PERCENT.captures(line)) {
+            windows[i].used = (100. - m[1].parse::<f64>().unwrap_or(100.)).clamp(0., 100.);
+        } else if let (Some(i), Some(m)) = (open, REFRESH.captures(line)) {
+            let n = |k: usize| m.get(k).and_then(|x| x.as_str().parse::<i64>().ok()).unwrap_or(0);
+            windows[i].resets_at = Some(now + ((n(1) * 24 + n(2)) * 60 + n(3)) * 60_000);
+            open = None;
+        }
+    }
+    // Antigravity's own limits are the Gemini group's; the Claude and GPT group is another's models.
+    if windows.iter().any(|w| w.label.as_deref().is_some_and(|l| l.starts_with("Gemini"))) {
+        windows.retain(|w| w.label.as_deref().is_some_and(|l| l.starts_with("Gemini")));
+    }
+    // One group left: its limits read like Claude's and Codex's ("5-hour", "week").
+    for w in &mut windows {
+        w.label = None;
+    }
+    let plan = PLAN.captures(text).map(|m| m[1].trim().to_string());
+    (!windows.is_empty()).then(|| PlanUsage { at: now, plan, windows })
+}
+
+/// Antigravity's last reading, kept so it shows as soon as Crew starts, as Claude's hook file does.
+pub fn agy_saved(paths: &Paths) -> Option<PlanUsage> {
+    let j: Value = serde_json::from_str(&std::fs::read_to_string(paths.data_dir.join("usage-agy.json")).ok()?).ok()?;
+    let windows: Vec<PlanWindow> = j
+        .get("windows")?
+        .as_array()?
+        .iter()
+        .filter_map(|w| {
+            Some(PlanWindow {
+                used: w.get("used")?.as_f64()?,
+                resets_at: w.get("resets_at").and_then(Value::as_i64),
+                minutes: w.get("minutes")?.as_i64()?,
+                label: w.get("label").and_then(Value::as_str).map(String::from),
+            })
+        })
+        .collect();
+    let plan = j.get("plan").and_then(Value::as_str).map(String::from);
+    (!windows.is_empty()).then(|| PlanUsage { at: j.get("at").and_then(Value::as_i64).unwrap_or(0), plan, windows })
+}
+
+pub fn save_agy(paths: &Paths, u: &PlanUsage) {
+    let windows: Vec<Value> = u.windows.iter().map(|w| json!({ "used": w.used, "resets_at": w.resets_at, "minutes": w.minutes, "label": w.label })).collect();
+    let _ = std::fs::write(paths.data_dir.join("usage-agy.json"), json!({ "at": u.at, "plan": u.plan, "windows": windows }).to_string());
+}
+
+/// "CLAUDE AND GPT" is "Claude and GPT": words of up to three letters are taken as acronyms.
+fn group_name(caps: &str) -> String {
+    caps.split_whitespace()
+        .map(|w| match w {
+            "AND" => "and".to_string(),
+            w if w.len() <= 3 => w.to_string(),
+            w => {
+                let lower = w.to_lowercase();
+                let mut c = lower.chars();
+                c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn bar_regex(label: &str) -> Regex {
@@ -235,6 +334,36 @@ struct Record {
     /// 0 standard, 1 fast, 2 ultrafast.
     speed: u8,
     key: Option<String>,
+}
+
+/// One of Antigravity's model replies, from brain/<conversation>/.system_generated/logs/transcript_full.jsonl:
+/// `{"type":"PLANNER_RESPONSE","created_at":…,"model":"gemini-3.8-flash-medium","input_tokens":2812,
+/// "cache_read_tokens":6650,"output_tokens":194,…}`. Its input leaves out what was read from the cache.
+fn agy_record(line: &str, file: &Path) -> Option<Record> {
+    if !line.contains("\"input_tokens\"") {
+        return None;
+    }
+    let o: Value = serde_json::from_str(line).ok()?;
+    let at = parse_ms(o.get("created_at")?.as_str()?)?;
+    let session = file.ancestors().nth(3)?.file_name()?.to_string_lossy().to_string();
+    let step = o.get("step_index").and_then(Value::as_i64).unwrap_or(at);
+    Some(Record {
+        t: at.div_euclid(60_000),
+        model: agy_model(o.get("model").and_then(Value::as_str).unwrap_or("agy")),
+        key: Some(format!("agy:{session}:{step}")),
+        session,
+        input: count(o.get("input_tokens")),
+        cached: count(o.get("cache_read_tokens")),
+        write: 0,
+        output: count(o.get("output_tokens")),
+        reasoning: 0,
+        speed: 0,
+    })
+}
+
+/// "gemini-3.8-flash-medium" is Gemini 3.8 Flash at medium effort: priced and listed as the model.
+fn agy_model(id: &str) -> String {
+    ["-low", "-medium", "-high"].iter().find_map(|e| id.strip_suffix(e)).unwrap_or(id).to_string()
 }
 
 fn parse_ms(text: &str) -> Option<i64> {
@@ -610,6 +739,8 @@ impl UsageData {
 #[derive(Default, Serialize, Deserialize)]
 struct FileScan {
     is_codex: bool,
+    #[serde(default)]
+    is_agy: bool,
     provider: String,
     size: u64,
     modified_ms: i64,
@@ -659,7 +790,9 @@ fn read_new_lines(scan: &mut FileScan, file: &Path) -> std::io::Result<()> {
     let Some(end) = bytes.iter().rposition(|b| *b == b'\n') else { return Ok(()) };
     for line in bytes[..end].split(|b| *b == b'\n') {
         let Ok(line) = std::str::from_utf8(line) else { continue };
-        if scan.is_codex {
+        if scan.is_agy {
+            scan.records.extend(agy_record(line, file));
+        } else if scan.is_codex {
             scan.records.extend(codex_record(line, &mut scan.state));
         } else {
             scan.records.extend(claude_records(line));
@@ -708,18 +841,36 @@ impl UsageScanner {
         for h in homes {
             roots.push(if h.cli == "claude" { (h.home.join("projects"), false, h.id.clone()) } else { (h.home.join("sessions"), true, h.id.clone()) });
         }
+        let mut sources: Vec<(Vec<(PathBuf, u64, i64)>, bool, bool, String)> = roots
+            .into_iter()
+            .map(|(root, is_codex, provider)| {
+                let mut found = Vec::new();
+                list_jsonl(&root, &mut found);
+                (found, is_codex, false, provider)
+            })
+            .collect();
+        // Antigravity keeps each conversation's turns in several files: only the full log is read.
+        let agy_logs: Vec<(PathBuf, u64, i64)> = std::fs::read_dir(paths.home.join(".gemini").join("antigravity-cli").join("brain"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let file = e.path().join(".system_generated").join("logs").join("transcript_full.jsonl");
+                let meta = std::fs::metadata(&file).ok()?;
+                Some((file, meta.len(), meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64)))
+            })
+            .collect();
+        sources.push((agy_logs, false, true, "agy".to_string()));
         let mut scanned = 0;
-        for (root, is_codex, provider) in roots {
-            let mut found = Vec::new();
-            list_jsonl(&root, &mut found);
+        for (found, is_codex, is_agy, provider) in sources {
             for (file, size, modified) in found {
                 let scan = cache.files.entry(file.to_string_lossy().to_string()).or_default();
                 scan.provider = provider.clone();
                 if scan.size == size && scan.modified_ms == modified {
                     continue;
                 }
-                if size < scan.offset || scan.is_codex != is_codex {
-                    *scan = FileScan { is_codex, provider: provider.clone(), ..FileScan::default() };
+                if size < scan.offset || scan.is_codex != is_codex || scan.is_agy != is_agy {
+                    *scan = FileScan { is_codex, is_agy, provider: provider.clone(), ..FileScan::default() };
                 }
                 if read_new_lines(scan, &file).is_ok() {
                     scan.size = size;
@@ -867,6 +1018,29 @@ mod tests {
         assert_eq!((u.windows[0].used, u.windows[0].minutes), (48., 300));
         assert_eq!((u.windows[1].used, u.windows[1].minutes), (51., 10080));
         assert!(u.windows.iter().all(|w| w.resets_at.is_some()));
+    }
+
+    #[test]
+    fn antigravity_s_usage_screen_gives_a_week_per_model_group() {
+        let screen = "  isb@example.com (Antigravity Starter Quota)\n└ Models & Quota\nGEMINI MODELS\n  Models within this group: Gemini 3.8 Flash\n  Weekly Limit Remaining\n    [████████] 99.72%\n    Refreshes in 152h 43m\nCLAUDE AND GPT MODELS\n  Models within this group: Claude Sonnet 4.6, GPT-OSS 120B\n  Weekly Limit Remaining\n    [████████] 100.00%\n    Quota available\n";
+        let u = parse_agy_usage_screen(screen).unwrap();
+        assert_eq!(u.plan.as_deref(), Some("Starter"));
+        let got: Vec<(Option<&str>, i64, i64)> = u.windows.iter().map(|w| (w.label.as_deref(), (w.used * 100.).round() as i64, w.minutes)).collect();
+        assert_eq!(got, [(None, 28, 10080)], "only Gemini's limit, the group Antigravity's own models are in");
+        let left = u.windows[0].resets_at.unwrap() - u.at;
+        assert_eq!(left, (152 * 60 + 43) * 60_000);
+        assert!(parse_agy_usage_screen("Models & Quota\nloading").is_none());
+    }
+
+    #[test]
+    fn antigravity_s_replies_count_once_with_the_model_s_name() {
+        let file = Path::new(r"C:\h\.gemini\antigravity-cli\brain\conv-1\.system_generated\logs\transcript_full.jsonl");
+        let line = r#"{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","created_at":"2026-11-19T16:30:18Z","model":"gemini-3.8-flash-medium","input_tokens":2812,"cache_read_tokens":6650,"output_tokens":194,"content":"hi"}"#;
+        let r = agy_record(line, file).unwrap();
+        assert_eq!((r.model.as_str(), r.session.as_str(), r.input, r.cached, r.output), ("gemini-3.8-flash", "conv-1", 2812, 6650, 194));
+        assert_eq!(r.key.as_deref(), Some("agy:conv-1:2"));
+        assert!(agy_record(r#"{"step_index":0,"type":"USER_INPUT","created_at":"2026-11-19T16:29:50Z","content":"x"}"#, file).is_none());
+        assert_eq!(agy_model("claude-opus-4-6-thinking"), "claude-opus-4-6-thinking");
     }
 
     #[test]
