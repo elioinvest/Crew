@@ -1114,7 +1114,12 @@ fn file_rows(root: &Path, query: &str) -> Vec<SuggestItem> {
 
 impl CrewApp {
     fn items_key(&self, o: &OpenSession) -> (String, String) {
-        let agent = if o.agent == "codex" { "codex" } else { "claude" }.to_string();
+        let agent = match o.agent.as_str() {
+            "codex" => "codex",
+            "agy" => "agy",
+            _ => "claude",
+        }
+        .to_string();
         let key = format!("{agent}|{}|{}", o.cwd.display(), o.provider.as_deref().unwrap_or(""));
         (agent, key)
     }
@@ -1135,7 +1140,11 @@ impl CrewApp {
             let command = if command.is_empty() { "codex".to_string() } else { command.to_string() };
             let work = cx.background_spawn(async move {
                 let home = provider.and_then(|id| providers::homes(&paths).into_iter().find(|h| h.id == id).map(|h| h.home));
-                if agent == "codex" { composer::codex_items(&paths, &command, &cwd, home.as_deref()) } else { composer::claude_items(&paths, &cwd, home.as_deref()) }
+                match agent.as_str() {
+                    "codex" => composer::codex_items(&paths, &command, &cwd, home.as_deref()),
+                    "agy" => composer::agy_items(&paths, &cwd),
+                    _ => composer::claude_items(&paths, &cwd, home.as_deref()),
+                }
             });
             cx.spawn(async move |this, cx| {
                 let items = work.await;
@@ -1151,9 +1160,9 @@ impl CrewApp {
 
     pub(super) fn update_suggest(&mut self, cx: &mut Context<Self>) {
         let Some(key) = self.layout.focused_session() else { return self.hide_suggest(cx) };
-        // agy's skills and commands are its own: it suggests them itself.
-        let Some(o) = self.by_key(key).filter(|o| o.agent != "ssh" && o.agent != "agy") else { return self.hide_suggest(cx) };
+        let Some(o) = self.by_key(key).filter(|o| o.agent != "ssh") else { return self.hide_suggest(cx) };
         let (codex, cwd) = (o.agent == "codex", o.cwd.clone());
+        let builtin_of = if o.agent == "agy" { "agy" } else if codex { "codex" } else { "claude" };
         let (value, range) = {
             let c = self.composer.read(cx);
             (c.value().to_string(), c.selected_range())
@@ -1212,8 +1221,7 @@ impl CrewApp {
                 loading = data.is_none();
                 let data = data.unwrap_or_default();
                 if kind == TriggerKind::Command {
-                    let agent = if codex { "codex" } else { "claude" };
-                    let builtin = composer::builtin_commands(agent).iter().map(|(name, description)| SuggestItem {
+                    let builtin = composer::builtin_commands(builtin_of).iter().map(|(name, description)| SuggestItem {
                         icon: SuggestIcon::None,
                         label: format!("/{name}"),
                         description: t(description).to_string(),

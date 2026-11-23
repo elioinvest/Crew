@@ -38,6 +38,48 @@ pub struct Items {
 
 /// The agents' own commands. Custom commands and skills come from their folders.
 pub fn builtin_commands(agent: &str) -> &'static [(&'static str, &'static str)] {
+    if agent == "agy" {
+        // As Antigravity CLI 1.5's "/" menu lists them.
+        return &[
+            ("add-dir", "Add a directory to the workspace"),
+            ("agents", "List available custom agents"),
+            ("artifact", "View and review artifacts"),
+            ("btw", "Ask a side question without interrupting the current task"),
+            ("changelog", "Show release notes and changes"),
+            ("clear", "Clear conversation and start a new one"),
+            ("codesearch", "Search code in the workspace"),
+            ("config", "Open settings panel"),
+            ("context", "Visualize current context usage"),
+            ("copy", "Copy the last response to the clipboard"),
+            ("credits", "Show remaining credits and purchase link"),
+            ("diff", "View uncommitted changes and per-turn diffs"),
+            ("effort", "Set the reasoning effort"),
+            ("exit", "Exit the CLI"),
+            ("feedback", "Submit feedback to improve the agent"),
+            ("fork", "Branch the conversation at this point"),
+            ("help", "Show available commands and keybindings"),
+            ("hooks", "Manage hook configurations for tool events"),
+            ("keybindings", "Set custom keybindings"),
+            ("logout", "Log out"),
+            ("mcp", "Manage MCP servers"),
+            ("model", "Set a model, or run one prompt on another model"),
+            ("open", "Open a file or view opened/edited files"),
+            ("permissions", "Manage tool permissions"),
+            ("projects", "Create and edit projects"),
+            ("record", "Dictate a prompt using your microphone"),
+            ("remote-control", "Turn on remote control for this session"),
+            ("rename", "Rename the current conversation"),
+            ("resume", "Browse and resume past conversations"),
+            ("rewind", "Rewind the conversation to a previous message"),
+            ("skills", "List available skills"),
+            ("statusline", "Toggle the status line"),
+            ("tasks", "View background tasks"),
+            ("thinking", "Toggle streaming the model's full thinking"),
+            ("title", "Toggle custom terminal window title"),
+            ("usage", "View model quota usage"),
+            ("voice", "Dictate a prompt or talk with the agent by voice"),
+        ];
+    }
     if agent == "codex" {
         &[
             ("model", "Switch the model and reasoning effort"),
@@ -301,6 +343,23 @@ fn ask_app_server(command: &str, codex_home: Option<&Path>, method: &str, params
 }
 
 /// Codex's skills for a folder come from Codex itself, so system and repo skills are included.
+/// Antigravity's skills, which it runs as slash commands like Claude: its own, the user's, and the
+/// project's (.agents/skills). A project's skill wins over a same-named one of the user's.
+pub fn agy_items(paths: &Paths, cwd: &Path) -> Items {
+    let home = paths.home.join(".gemini").join("antigravity-cli");
+    let mut skills: Vec<Skill> = Vec::new();
+    for (root, scope) in [(cwd.join(".agents").join("skills"), "project"), (home.join("skills"), "personal"), (home.join("builtin").join("skills"), "builtin")] {
+        for d in dirs(&root) {
+            if let Some(s) = skill_at(&root.join(&d), &d, "", scope) {
+                if !skills.iter().any(|x| x.name == s.name) {
+                    skills.push(s);
+                }
+            }
+        }
+    }
+    Items { skills, commands: Vec::new() }
+}
+
 pub fn codex_items(paths: &Paths, command: &str, cwd: &Path, provider_home: Option<&Path>) -> Items {
     let home = provider_home.unwrap_or(&paths.codex_home);
     let mut skills: Option<Vec<Skill>> = ask_app_server(command, provider_home, "skills/list", json!({ "cwds": [cwd] }), Duration::from_secs(15)).and_then(|r| {
@@ -1008,6 +1067,26 @@ mod tests {
         let s = read_screen("codex", &lines);
         assert_eq!((s.model.as_deref(), s.effort.as_deref()), (Some("gpt-6-luna"), Some("high")));
         assert_eq!(prompt_text(&["a".to_string(), "❯ typed".to_string()]).as_deref(), Some("typed"));
+    }
+
+    #[test]
+    fn agy_skills_come_from_the_project_the_user_and_agy_itself() {
+        let d = std::env::temp_dir().join(format!("crew-agy-skills-{}", uuid::Uuid::new_v4()));
+        let paths = Paths { home: d.join("home"), data_dir: d.join("data"), codex_home: d.join("home/.codex") };
+        let cwd = d.join("proj");
+        let skill = |dir: PathBuf, front: &str| {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("SKILL.md"), format!("---\n{front}\n---\nbody\n")).unwrap();
+        };
+        let agy = paths.home.join(".gemini/antigravity-cli");
+        skill(agy.join("builtin/skills/antigravity_guide"), "name: antigravity-guide\ndescription: The guide");
+        skill(agy.join("builtin/skills/conversations"), "name: conversations\ndescription: x\nuser-invocable: false");
+        skill(agy.join("skills/deploy"), "name: deploy\ndescription: Mine");
+        skill(cwd.join(".agents/skills/deploy"), "name: deploy\ndescription: The project's");
+        let items = agy_items(&paths, &cwd);
+        let got: Vec<(&str, &str, &str)> = items.skills.iter().map(|s| (s.name.as_str(), s.description.as_str(), s.scope.as_str())).collect();
+        assert_eq!(got, [("deploy", "The project's", "project"), ("antigravity-guide", "The guide", "builtin")]);
+        assert!(builtin_commands("agy").iter().any(|(n, _)| *n == "model") && builtin_commands("agy").iter().any(|(n, _)| *n == "usage"));
     }
 
     #[test]

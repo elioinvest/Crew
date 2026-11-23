@@ -4,11 +4,11 @@
 //! folder and shares the right side with the Git panel and the browser.
 
 use crew_core::files::{self, Content, Hit};
-use gpui::{ObjectFit, StyledImage};
+use gpui::{MouseDownEvent, ObjectFit, Point, StyledImage};
 use gpui_component::input::{Editor, EditorState, Position};
 use gpui_component::text::TextView;
 
-use super::overlays::{Action, ToastKind};
+use super::overlays::{Action, ToastKind, entry};
 use super::*;
 use crate::i18n::zh;
 
@@ -464,6 +464,32 @@ impl CrewApp {
         self.files_width.unwrap_or_else(|| self.config.f32("filesWidth2", FILES_WIDTH).max(FILES_MIN))
     }
 
+    /// Right-click on a file or folder: show it in Explorer, open it, or copy where it is.
+    fn tree_menu(&mut self, root: PathBuf, rel: String, dir: bool, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let full = root.join(rel.replace('/', "\\"));
+        let (reveal, system, copy, view_root, view_rel, toggle) = (full.clone(), full.clone(), full, root, rel.clone(), rel.clone());
+        let open = if dir {
+            entry(t("Expand"), move |app, _, cx| {
+                if let Some(f) = app.files.as_mut() {
+                    if !f.expanded.remove(&toggle) {
+                        f.expanded.insert(toggle.clone());
+                    }
+                }
+                app.reload_tree(cx);
+            })
+        } else {
+            entry(t("Open"), move |app, _, cx| app.show_file(view_root.clone(), view_rel.clone(), None, cx))
+        };
+        let items = vec![
+            entry(t("Open file location"), move |_, _, cx| cx.reveal_path(&reveal)),
+            open,
+            entry(t("Open with default app"), move |_, _, cx| cx.open_with_system(&system)),
+            entry(t("Copy path"), move |app, _, cx| app.copy_text(copy.to_string_lossy(), cx)).separated(),
+            entry(t("Copy relative path"), move |app, _, cx| app.copy_text(rel.clone(), cx)),
+        ];
+        self.open_menu(at, items, cx);
+    }
+
     pub(super) fn render_files_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let c = self.colors;
         let f = self.files.as_ref()?;
@@ -494,6 +520,7 @@ impl CrewApp {
                 .map(|(i, hit)| {
                     let selected = f.selected.as_deref() == Some(hit.rel.as_str());
                     let (open_root, rel, line) = (root.clone(), hit.rel.clone(), hit.line);
+                    let (menu_root, menu_rel) = (root.clone(), hit.rel.clone());
                     let name = hit.rel.rsplit('/').next().unwrap_or(&hit.rel).to_string();
                     let place = hit.line.map_or_else(|| hit.rel.clone(), |n| format!("{}:{n}", hit.rel));
                     div()
@@ -507,6 +534,7 @@ impl CrewApp {
                         .when(selected, |d| d.bg(c.hover))
                         .hover(move |s| s.bg(c.hover))
                         .on_click(cx.listener(move |app, _, _, cx| app.show_file(open_root.clone(), rel.clone(), line, cx)))
+                        .on_mouse_down(MouseButton::Right, cx.listener(move |app, e: &MouseDownEvent, _, cx| app.tree_menu(menu_root.clone(), menu_rel.clone(), false, e.position, cx)))
                         .child(div().truncate().text_color(c.text).child(name))
                         .child(div().truncate().text_size(px(11.5)).text_color(c.muted).child(place))
                         .when_some(hit.text.clone(), |d, text| d.child(div().truncate().text_size(px(11.5)).font_family("Cascadia Mono").text_color(c.muted).child(text)))
@@ -524,6 +552,7 @@ impl CrewApp {
                     }
                     let selected = f.selected.as_deref() == Some(row.rel.as_str());
                     let (dir, rel, open_root) = (row.dir, row.rel.clone(), root.clone());
+                    let (menu_root, menu_rel) = (root.clone(), row.rel.clone());
                     div()
                         .id(("files-row", i))
                         .flex()
@@ -548,6 +577,7 @@ impl CrewApp {
                                 app.show_file(open_root.clone(), rel.clone(), None, cx);
                             }
                         }))
+                        .on_mouse_down(MouseButton::Right, cx.listener(move |app, e: &MouseDownEvent, _, cx| app.tree_menu(menu_root.clone(), menu_rel.clone(), dir, e.position, cx)))
                         .child(div().flex_none().w(px(12.)).text_color(c.muted).when(row.dir, |d| d.child(Icon::new(if row.open { IconName::ChevronDown } else { IconName::ChevronRight }).size(px(12.)))))
                         .child(div().flex_none().text_color(c.muted).child(if row.dir { Icon::empty().path(assets::FOLDER) } else { Icon::new(IconName::File) }.size(px(15.))))
                         .child(div().min_w(px(0.)).truncate().text_color(if row.ignored { c.muted } else { c.text }).when(row.ignored, |d| d.italic()).child(row.name.clone()))
